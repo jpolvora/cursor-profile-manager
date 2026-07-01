@@ -6,13 +6,21 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ## 2026-07-01
 
+### Changed
+
+- **Start** — moved from the toolbar to the first button in each row's **Actions** column (toolbar **Start** removed).
+
+### Removed
+
+- **Toolbar Start button** — launch a profile via **Start ▶** in the grid Actions column or double-click the row.
+
 ### Fixed
 
 - **Toolbar separator** — removed the internal row divider that rendered as a broken dashed line between the profile and theme rows.
 
 ### Added
 
-- **Cursor install check** — footer shows installed Cursor IDE version and CLI status; when missing, **Install Cursor** opens a setup dialog (download link, PATH CLI steps, **Check again**). Add, Edit, and Start require Cursor IDE; Add and Start toolbar buttons disable when IDE is not found.
+- **Cursor install check** — footer shows installed Cursor IDE version and CLI status; when missing, **Install Cursor** opens a setup dialog (download link, PATH CLI steps, **Check again**). Add requires Cursor IDE; row **Start** and Add disable when IDE is not found.
 
 ### Fixed
 

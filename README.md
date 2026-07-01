@@ -39,9 +39,8 @@ Re-run after moving this folder to repair the shortcut.
 | Feature | Description |
 |---------|-------------|
 | **Profile CRUD** | Add profiles from the toolbar; edit and delete per row in the **Actions** column |
-| **Actions column** | Per-row buttons: **Focus**, **Close**, **Folder**, **Edit**, **Delete** (Focus/Close enabled when Instances > 0) |
-| **Start ▶** | Opens another Cursor window for the selected profile (`--new-window`; multiple instances allowed) |
-| **Double-click row** | Same as Start |
+| **Actions column** | Per-row buttons: **Start ▶**, **Focus**, **Close**, **Folder**, **Edit**, **Del** (Start disabled when Cursor is not installed; Focus/Close when Instances = 0) |
+| **Double-click row** | Same as **Start** in the Actions column |
 | **Status column** | `● Running` / `○ Idle` from live `Cursor.exe` process inspection |
 | **Instances column** | Count of running windows per profile (0, 1, 2, …) |
 | **Grid columns** | Name, User Data Dir, Instances, Status, Notes, Actions (default project folder is edited in Add/Edit only) |
@@ -50,7 +49,7 @@ Re-run after moving this folder to repair the shortcut.
 | **Persistence** | Profiles saved to `profiles.json` in the profiles directory |
 | **Theme** | Light, dark, or **System default** (follows Windows app theme); bottom-toolbar dropdown; saved in `settings.json` |
 | **Check for updates** | Footer link (with current `v#.#.#` beside it) compares `App-Version` markers against GitHub `master` and overwrites the install folder in place (`.bat` and Desktop shortcuts keep working) |
-| **Cursor dependency** | Footer shows Cursor IDE version and CLI status; **Install Cursor** dialog when missing; Add, Edit, and Start blocked until IDE is detected |
+| **Cursor dependency** | Footer shows Cursor IDE version and CLI status; **Install Cursor** dialog when missing; Add and row **Start** blocked until IDE is detected |
 | **Safe delete** | Optional data-folder removal; blocked while any instance is running |
 
 ## Usage
@@ -58,9 +57,9 @@ Re-run after moving this folder to repair the shortcut.
 1. Open the Profile Manager.
 2. Add a profile (name auto-suggests a folder under `.cursor-profiles\`).
 3. Optionally set a default project folder (leave blank to open with no folder on Start).
-4. Click **Start ▶** (or double-click the row) — Cursor opens with `--user-data-dir` and `--new-window`.
-5. Click **Start ▶** again to open another window for the same profile.
-6. Use the row **Actions** buttons: **Focus** / **Close** (when running), **Folder**, **Edit**, or **Delete**.
+4. Click **Start ▶** in a row's Actions column (or double-click the row) — Cursor opens with `--user-data-dir` and `--new-window`.
+5. Click **Start ▶** again on the same row to open another window for that profile.
+6. Use other Actions: **Focus** / **Close** (when running), **Folder**, **Edit**, or **Del**.
 7. On first launch, sign in with the account for that profile; settings and extensions persist there.
 
 ## Technical details
@@ -147,7 +146,7 @@ Click **Check for updates** in the footer status bar. The manager reads the `# A
 
 On apply, it downloads `cursor-profile-manager.ps1`, `cursor-profile-manager.bat`, and `install-desktop-shortcut.ps1`, replaces them in the folder you launched from, then restarts. Existing `.bat` launchers and Desktop shortcuts keep working.
 
-Current release marker in the main script: `# App-Version: 1.2.9` / `$script:AppVersionId` (also shown in the footer as `v1.2.9`).
+Current release marker in the main script: `# App-Version: 1.3.2` / `$script:AppVersionId` (also shown in the footer as `v1.3.2`).
 
 ### Manual launch (without the GUI)
 

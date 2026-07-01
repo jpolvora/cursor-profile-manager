@@ -16,12 +16,12 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 1.3.1
+# App-Version: 1.3.2
 $AppWindowTitle = 'Cursor Profile Manager'
 $SingleInstanceMutexName = 'Local\CursorProfileManager_GUI_v1'
-$script:AppVersionId = '1.3.1'
+$script:AppVersionId = '1.3.2'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
-$script:GridActionColumnCount = 5
+$script:GridActionColumnCount = 6
 $script:InstallRoot = $PSScriptRoot
 $script:UpdateRepoId = 'jpolvora/cursor-profile-manager'
 $script:UpdateBranch = 'master'
@@ -180,7 +180,7 @@ public static class TextBoxCue {
 # Build UI symbols via code points so the script stays ASCII-safe under Windows PowerShell 5.1.
 $UiStatusRunning = "$([char]0x25CF) Running"
 $UiStatusIdle = "$([char]0x25CB) Idle"
-$UiStartLabel = "Start $([char]0x25B6)"
+$UiGridStartLabel = "Start $([char]0x25B6)"
 
 # ---------------------------------------------------------------------------
 # UI theme
@@ -443,7 +443,7 @@ function New-GridActionButtonColumn {
 function Apply-GridActionColumnTheme {
     param([System.Windows.Forms.DataGridView]$TargetGrid)
 
-    foreach ($actionName in @('ActFocus', 'ActClose', 'ActFolder', 'ActEdit', 'ActDelete')) {
+    foreach ($actionName in @('ActStart', 'ActFocus', 'ActClose', 'ActFolder', 'ActEdit', 'ActDelete')) {
         if (-not $TargetGrid.Columns.Contains($actionName)) { continue }
         $col = $TargetGrid.Columns[$actionName]
         $col.DefaultCellStyle.BackColor = $script:UiPanelColor
@@ -457,7 +457,8 @@ function Apply-GridActionColumnTheme {
 function Add-GridActionColumns {
     param([System.Windows.Forms.DataGridView]$TargetGrid)
 
-    [void]$TargetGrid.Columns.Add((New-GridActionButtonColumn -Name 'ActFocus' -HeaderText 'Actions' -ButtonText 'Focus' -Width 46))
+    [void]$TargetGrid.Columns.Add((New-GridActionButtonColumn -Name 'ActStart' -HeaderText 'Actions' -ButtonText $UiGridStartLabel -Width 52))
+    [void]$TargetGrid.Columns.Add((New-GridActionButtonColumn -Name 'ActFocus' -HeaderText '' -ButtonText 'Focus' -Width 46))
     [void]$TargetGrid.Columns.Add((New-GridActionButtonColumn -Name 'ActClose' -HeaderText '' -ButtonText 'Close' -Width 46))
     [void]$TargetGrid.Columns.Add((New-GridActionButtonColumn -Name 'ActFolder' -HeaderText '' -ButtonText 'Folder' -Width 48))
     [void]$TargetGrid.Columns.Add((New-GridActionButtonColumn -Name 'ActEdit' -HeaderText '' -ButtonText 'Edit' -Width 40))
@@ -625,9 +626,6 @@ function Apply-ToolbarTheme {
     if ($script:ProfileFlow) {
         $script:ProfileFlow.BackColor = $script:UiPanelColor
     }
-    if ($script:StartHost) {
-        $script:StartHost.BackColor = $script:UiPanelColor
-    }
     if ($script:ThemeFlow) {
         $script:ThemeFlow.BackColor = $script:UiPanelColor
     }
@@ -641,9 +639,6 @@ function Apply-ToolbarTheme {
     if ($btnAdd) {
         Update-ToolbarButtonTheme -Button $btnAdd
         Update-ToolbarButtonTheme -Button $btnRefresh
-    }
-    if ($btnStart) {
-        Update-ToolbarButtonTheme -Button $btnStart -Primary
     }
 
     if ($script:ThemeLabel) {
@@ -1148,12 +1143,10 @@ function Update-CursorInstallUi {
     if ($script:CursorInstallLink) {
         Set-CursorInstallLinkDisplay
     }
-    if ($btnStart) {
-        $btnStart.Enabled = (Get-CursorInstallInfo).IsInstalled
-    }
     if ($btnAdd) {
         $btnAdd.Enabled = (Get-CursorInstallInfo).IsInstalled
     }
+    Sync-GridActionInstallState
 }
 
 function Set-CursorInstallLinkDisplay {
@@ -1591,6 +1584,11 @@ function Invoke-GridProfileAction {
     )
 
     switch ($ActionName) {
+        'ActStart' {
+            if (-not (Test-CursorInstallReady)) { return }
+            Start-CursorProfileInstance -Profile $Profile
+            Request-DeferredGridRefresh
+        }
         'ActFocus' {
             [void](Invoke-FocusCursorProfile -Profile $Profile)
         }
@@ -1605,6 +1603,25 @@ function Invoke-GridProfileAction {
         }
         'ActDelete' {
             [void](Remove-Profile -Profile $Profile)
+        }
+    }
+}
+
+function Sync-GridActionInstallState {
+    if (-not $grid -or -not $grid.Columns.Contains('ActStart')) { return }
+
+    $startEnabled = (Get-CursorInstallInfo).IsInstalled
+    $wantReadOnly = -not $startEnabled
+    $actionFore = if ($startEnabled) { $script:UiTextPrimary } else { $script:UiIdleColor }
+
+    foreach ($row in $grid.Rows) {
+        if ($row.IsNewRow) { continue }
+        $startCell = $row.Cells['ActStart']
+        if ($startCell.ReadOnly -ne $wantReadOnly) {
+            $startCell.ReadOnly = $wantReadOnly
+        }
+        if ($startCell.Style.ForeColor -ne $actionFore) {
+            $startCell.Style.ForeColor = $actionFore
         }
     }
 }
@@ -2008,12 +2025,11 @@ $script:ToolbarTable.Padding = New-Object System.Windows.Forms.Padding 0
 $script:ProfileTable = New-Object System.Windows.Forms.TableLayoutPanel
 $script:ProfileTable.Dock = [System.Windows.Forms.DockStyle]::Fill
 $script:ProfileTable.RowCount = 1
-$script:ProfileTable.ColumnCount = 3
+$script:ProfileTable.ColumnCount = 2
 $script:ProfileTable.Margin = New-Object System.Windows.Forms.Padding 0
 $script:ProfileTable.Padding = New-Object System.Windows.Forms.Padding 0
 [void]$script:ProfileTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 58)))
 [void]$script:ProfileTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-[void]$script:ProfileTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 112)))
 
 $script:LblProfilesSection = New-ToolbarSectionLabel -Text 'Profiles'
 $script:ProfileFlow = New-Object System.Windows.Forms.FlowLayoutPanel
@@ -2024,14 +2040,8 @@ $script:ProfileFlow.Margin = New-Object System.Windows.Forms.Padding 0
 $script:ProfileFlow.Padding = New-Object System.Windows.Forms.Padding 0, 4, 0, 0
 $script:ProfileFlow.AutoSize = $false
 
-$script:StartHost = New-Object System.Windows.Forms.Panel
-$script:StartHost.Dock = [System.Windows.Forms.DockStyle]::Fill
-$script:StartHost.Margin = New-Object System.Windows.Forms.Padding 0
-$script:StartHost.Padding = New-Object System.Windows.Forms.Padding 0
-
 $script:ProfileTable.Controls.Add($script:LblProfilesSection, 0, 0)
 $script:ProfileTable.Controls.Add($script:ProfileFlow, 1, 0)
-$script:ProfileTable.Controls.Add($script:StartHost, 2, 0)
 $script:ToolbarTable.Controls.Add($script:ProfileTable, 0, 0)
 
 $script:LaunchTable = New-Object System.Windows.Forms.TableLayoutPanel
@@ -2051,7 +2061,7 @@ $script:ThemeFlow.Margin = New-Object System.Windows.Forms.Padding 0
 $script:ThemeFlow.Padding = New-Object System.Windows.Forms.Padding 0, 4, 0, 0
 
 $script:LblLaunchHint = New-Object System.Windows.Forms.Label
-$script:LblLaunchHint.Text = 'Double-click a row to start  |  Per-row Actions: Focus, Close, Folder, Edit, Delete'
+$script:LblLaunchHint.Text = 'Double-click a row to start  |  Actions: Start, Focus, Close, Folder, Edit, Del'
 $script:LblLaunchHint.Dock = [System.Windows.Forms.DockStyle]::Fill
 $script:LblLaunchHint.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
 $script:LblLaunchHint.ForeColor = $script:UiTextMuted
@@ -2222,7 +2232,7 @@ function Sync-GridRowToView {
         $cells['Instances'].Style.ForeColor = $foreColor
     }
 
-    foreach ($actionName in @('ActFocus', 'ActClose', 'ActFolder', 'ActEdit', 'ActDelete')) {
+    foreach ($actionName in @('ActStart', 'ActFocus', 'ActClose', 'ActFolder', 'ActEdit', 'ActDelete')) {
         if (-not $grid.Columns.Contains($actionName)) { continue }
         $actionCell = $cells[$actionName]
         $rowBack = if ($Row.Index % 2 -eq 1) { $script:UiGridAltRow } else { $script:UiPanelColor }
@@ -2231,6 +2241,19 @@ function Sync-GridRowToView {
         }
         if ($actionCell.Style.SelectionBackColor -ne $rowBack) {
             $actionCell.Style.SelectionBackColor = $rowBack
+        }
+    }
+
+    if ($grid.Columns.Contains('ActStart')) {
+        $startCell = $cells['ActStart']
+        $startEnabled = (Get-CursorInstallInfo).IsInstalled
+        $wantReadOnly = -not $startEnabled
+        if ($startCell.ReadOnly -ne $wantReadOnly) {
+            $startCell.ReadOnly = $wantReadOnly
+        }
+        $startFore = if ($startEnabled) { $script:UiTextPrimary } else { $script:UiIdleColor }
+        if ($startCell.Style.ForeColor -ne $startFore) {
+            $startCell.Style.ForeColor = $startFore
         }
     }
 
@@ -2394,16 +2417,6 @@ $script:ThemeCombo.Add_SelectedIndexChanged({
 })
 $script:ThemeFlow.Controls.AddRange(@($script:ThemeLabel, $script:ThemeCombo))
 
-$btnStart = New-ToolbarButton -Text $UiStartLabel -Primary -Width 108
-$btnStart.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
-$btnStart.Margin = New-Object System.Windows.Forms.Padding 0, 4, 0, 0
-$script:StartHost.Controls.Add($btnStart)
-$script:StartHost.Add_Resize({
-    if (-not $btnStart) { return }
-    $x = [Math]::Max(0, $script:StartHost.ClientSize.Width - $btnStart.Width)
-    $btnStart.Location = New-Object System.Drawing.Point($x, 4)
-})
-
 Apply-ToolbarTheme
 
 $btnAdd.Add_Click({
@@ -2420,17 +2433,6 @@ $btnAdd.Add_Click({
         Save-Profiles -Profiles $script:Profiles
         Update-ProfileGrid
     }
-})
-
-$btnStart.Add_Click({
-    $selected = Get-SelectedProfile
-    if (-not $selected) {
-        [System.Windows.Forms.MessageBox]::Show('Select a profile to start.', 'No selection', 'OK', 'Information') | Out-Null
-        return
-    }
-    if (-not (Test-CursorInstallReady)) { return }
-    Start-CursorProfileInstance -Profile $selected
-    Request-DeferredGridRefresh
 })
 
 $btnRefresh.Add_Click({

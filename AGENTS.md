@@ -76,8 +76,8 @@ Override with `CURSOR_PROFILES_DIR`. Override binary with `CURSOR_BIN`.
 The main script carries a release marker used by **Check for updates**:
 
 ```powershell
-# App-Version: 1.2.9
-$script:AppVersionId = '1.2.9'
+# App-Version: 1.3.2
+$script:AppVersionId = '1.3.2'
 ```
 
 Rules:
@@ -129,7 +129,7 @@ Key modules inside the script:
 | Launch | `Find-CursorExecutable`, `Find-CursorCliExecutable`, `Get-CursorInstallInfo`, `Test-CursorInstallReady`, `Show-CursorInstallDialog`, `Start-CursorProfileInstance` | |
 | Focus | `Get-CursorProfileWindowHandles`, `Invoke-FocusCursorProfile` | EnumWindows by profile PIDs; cycles when multiple windows |
 | Close | `Invoke-CloseAllCursorProfileInstances` | WM_CLOSE on profile windows, then force-stop remaining PIDs |
-| Grid actions | `Add-GridActionColumns`, `Invoke-GridProfileAction`, `Edit-Profile`, `Remove-Profile` | Per-row button columns; shared handlers for toolbar-free CRUD and window ops |
+| Grid actions | `Add-GridActionColumns`, `Invoke-GridProfileAction`, `Sync-GridActionInstallState`, `Edit-Profile`, `Remove-Profile` | Per-row buttons: Start, Focus, Close, Folder, Edit, Del |
 | Grid model | `Build-GridModel`, `Test-GridModelEqual`, `Update-ProfileGrid` | View separated from UI |
 | Grid view sync | `Apply-GridModelToView`, `Sync-GridRowToView` | In-place cell updates |
 | Notifications | *(removed)* | Was tray balloon on instance count change |
