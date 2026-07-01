@@ -8,6 +8,14 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ### Fixed
 
+- **Toolbar separator** — removed the internal row divider that rendered as a broken dashed line between the profile and theme rows.
+
+### Added
+
+- **Cursor install check** — footer shows installed Cursor IDE version and CLI status; when missing, **Install Cursor** opens a setup dialog (download link, PATH CLI steps, **Check again**). Add, Edit, and Start require Cursor IDE; Add and Start toolbar buttons disable when IDE is not found.
+
+### Fixed
+
 - **Toolbar Start button** — no longer renders as a large blue block (`Dock = Fill` removed; Start sits on the profile row with fixed size).
 - **Actions column** — smaller buttons (8 pt font, narrower columns); selected-row highlight no longer floods action cells blue.
 

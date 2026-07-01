@@ -16,10 +16,11 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 1.2.9
+# App-Version: 1.3.1
 $AppWindowTitle = 'Cursor Profile Manager'
 $SingleInstanceMutexName = 'Local\CursorProfileManager_GUI_v1'
-$script:AppVersionId = '1.2.9'
+$script:AppVersionId = '1.3.1'
+$script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 5
 $script:InstallRoot = $PSScriptRoot
 $script:UpdateRepoId = 'jpolvora/cursor-profile-manager'
@@ -227,6 +228,7 @@ function Get-UiThemePalettes {
             IdleColor      = [System.Drawing.Color]::FromArgb(120, 124, 130)
             InputBackColor = [System.Drawing.Color]::White
             InputForeColor = [System.Drawing.Color]::FromArgb(32, 33, 36)
+            WarningColor   = [System.Drawing.Color]::FromArgb(180, 95, 6)
         }
         dark = @{
             BackColor      = [System.Drawing.Color]::FromArgb(32, 33, 36)
@@ -245,6 +247,7 @@ function Get-UiThemePalettes {
             IdleColor      = [System.Drawing.Color]::FromArgb(154, 160, 166)
             InputBackColor = [System.Drawing.Color]::FromArgb(55, 56, 60)
             InputForeColor = [System.Drawing.Color]::FromArgb(232, 234, 237)
+            WarningColor   = [System.Drawing.Color]::FromArgb(255, 183, 77)
         }
     }
 }
@@ -298,6 +301,7 @@ function Set-UiThemePalette {
     $script:UiIdleColor = $palette.IdleColor
     $script:UiInputBackColor = $palette.InputBackColor
     $script:UiInputForeColor = $palette.InputForeColor
+    $script:UiWarningColor = $palette.WarningColor
     $script:DefaultGridForeColor = $script:UiTextPrimary
     $script:RunningGridForeColor = $script:UiRunningColor
 }
@@ -610,9 +614,6 @@ function Apply-ToolbarTheme {
     if ($script:ToolbarTable) {
         $script:ToolbarTable.BackColor = $script:UiPanelColor
     }
-    if ($script:ToolbarRowSep) {
-        $script:ToolbarRowSep.BackColor = $script:UiBorderColor
-    }
     if ($script:LblProfilesSection) {
         $script:LblProfilesSection.ForeColor = $script:UiTextMuted
         $script:LblProfilesSection.BackColor = $script:UiPanelColor
@@ -683,6 +684,13 @@ function Apply-UiThemeToMainWindow {
             $script:CheckUpdateLink.VisitedLinkColor = $script:UiAccent
             $script:CheckUpdateLink.BackColor = $script:UiPanelColor
             Set-CheckUpdateLinkDisplay
+        }
+
+        if ($script:CursorInstallLink) {
+            $script:CursorInstallLink.BackColor = $script:UiPanelColor
+            $script:CursorInstallLink.ActiveLinkColor = $script:UiAccentHover
+            $script:CursorInstallLink.VisitedLinkColor = $script:UiAccent
+            Set-CursorInstallLinkDisplay
         }
 
         Sync-UiThemeComboSelection
@@ -1057,6 +1065,267 @@ function Find-CursorExecutable {
     return $null
 }
 
+function Find-CursorCliExecutable {
+    $cmd = Get-Command cursor -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source) { return $cmd.Source }
+
+    $idePath = Find-CursorExecutable
+    if ($idePath -and $idePath -match '(?i)Cursor\.exe$') {
+        $bundledCli = Join-Path (Split-Path -Parent $idePath) 'resources\app\bin\cursor.cmd'
+        if (Test-Path -LiteralPath $bundledCli) { return $bundledCli }
+    }
+
+    return $null
+}
+
+function Get-CursorVersionFromExecutable {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+
+    try {
+        $vi = (Get-Item -LiteralPath $Path).VersionInfo
+        $ver = [string]$vi.FileVersion
+        if ([string]::IsNullOrWhiteSpace($ver)) {
+            $ver = [string]$vi.ProductVersion
+        }
+        if ($ver -match '^([\d.]+)') {
+            return $matches[1]
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ver)) {
+            return ($ver -split '\s+')[0]
+        }
+    }
+    catch {
+    }
+
+    return $null
+}
+
+function Get-CursorInstallInfo {
+    param([switch]$ForceRefresh)
+
+    if (-not $ForceRefresh -and $script:CursorInstallInfo) {
+        return $script:CursorInstallInfo
+    }
+
+    $idePath = Find-CursorExecutable
+    $cliPath = Find-CursorCliExecutable
+    $ideVersion = $null
+    $cliVersion = $null
+
+    if ($idePath -and $idePath -match '(?i)Cursor\.exe$') {
+        $ideVersion = Get-CursorVersionFromExecutable -Path $idePath
+    }
+    elseif ($idePath) {
+        $ideVersion = Get-CursorVersionFromExecutable -Path $idePath
+    }
+
+    if ($cliPath) {
+        if ($ideVersion) {
+            $cliVersion = $ideVersion
+        }
+        else {
+            $cliVersion = Get-CursorVersionFromExecutable -Path $cliPath
+        }
+    }
+
+    $isInstalled = -not [string]::IsNullOrWhiteSpace($idePath)
+    $info = [PSCustomObject]@{
+        IsInstalled = $isInstalled
+        IdePath     = $idePath
+        IdeVersion  = $ideVersion
+        CliPath     = $cliPath
+        CliVersion  = $cliVersion
+        HasCli      = -not [string]::IsNullOrWhiteSpace($cliPath)
+    }
+
+    $script:CursorInstallInfo = $info
+    return $info
+}
+
+function Update-CursorInstallUi {
+    if ($script:CursorInstallLink) {
+        Set-CursorInstallLinkDisplay
+    }
+    if ($btnStart) {
+        $btnStart.Enabled = (Get-CursorInstallInfo).IsInstalled
+    }
+    if ($btnAdd) {
+        $btnAdd.Enabled = (Get-CursorInstallInfo).IsInstalled
+    }
+}
+
+function Set-CursorInstallLinkDisplay {
+    if (-not $script:CursorInstallLink) { return }
+
+    $info = Get-CursorInstallInfo
+    $script:CursorInstallLink.Links.Clear()
+
+    if ($info.IsInstalled) {
+        $versionText = if ($info.IdeVersion) { $info.IdeVersion } else { 'installed' }
+        if ($info.HasCli) {
+            $script:CursorInstallLink.Text = "Cursor $versionText | CLI"
+            $script:CursorInstallLink.LinkArea = New-Object System.Windows.Forms.LinkArea(0, 0)
+            $script:CursorInstallLink.LinkColor = $script:UiTextMuted
+            $script:CursorInstallLink.ForeColor = $script:UiTextMuted
+            return
+        }
+
+        $prefix = "Cursor $versionText | "
+        $linkText = 'CLI missing'
+        $script:CursorInstallLink.Text = $prefix + $linkText
+        $script:CursorInstallLink.ForeColor = $script:UiWarningColor
+        $script:CursorInstallLink.LinkColor = $script:UiAccent
+        [void]$script:CursorInstallLink.Links.Add($prefix.Length, $linkText.Length)
+        return
+    }
+
+    $prefix = 'Cursor not found - '
+    $linkText = 'Install Cursor'
+    $script:CursorInstallLink.Text = $prefix + $linkText
+    $script:CursorInstallLink.ForeColor = $script:UiWarningColor
+    $script:CursorInstallLink.LinkColor = $script:UiAccent
+    [void]$script:CursorInstallLink.Links.Add($prefix.Length, $linkText.Length)
+}
+
+function Show-CursorInstallDialog {
+    $info = Get-CursorInstallInfo -ForceRefresh
+
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = 'Install Cursor'
+    $dlg.Size = New-Object System.Drawing.Size(520, 360)
+    $dlg.StartPosition = 'CenterParent'
+    $dlg.FormBorderStyle = 'FixedDialog'
+    $dlg.MaximizeBox = $false
+    $dlg.MinimizeBox = $false
+    $dlg.Font = $script:UiFont
+    $dlg.BackColor = $script:UiBackColor
+    [void](Set-FormIcon -TargetForm $dlg)
+
+    $lblIntro = New-Object System.Windows.Forms.Label
+    $lblIntro.Location = New-Object System.Drawing.Point(20, 20)
+    $lblIntro.Size = New-Object System.Drawing.Size(470, 48)
+    $lblIntro.ForeColor = $script:UiTextPrimary
+    $lblIntro.Text = 'Cursor IDE is required to add, edit, and start profiles. The cursor CLI is recommended for terminal and automation workflows.'
+    $dlg.Controls.Add($lblIntro)
+
+    $statusLines = @()
+    if ($info.IdePath) {
+        $ideVer = if ($info.IdeVersion) { " ($($info.IdeVersion))" } else { '' }
+        $statusLines += "IDE: $($info.IdePath)$ideVer"
+    }
+    else {
+        $statusLines += 'IDE: not found'
+    }
+    if ($info.CliPath) {
+        $cliVer = if ($info.CliVersion) { " ($($info.CliVersion))" } else { '' }
+        $statusLines += "CLI: $($info.CliPath)$cliVer"
+    }
+    else {
+        $statusLines += 'CLI: not found on PATH (install from Cursor after IDE setup)'
+    }
+
+    $lblStatus = New-Object System.Windows.Forms.Label
+    $lblStatus.Location = New-Object System.Drawing.Point(20, 78)
+    $lblStatus.Size = New-Object System.Drawing.Size(470, 72)
+    $lblStatus.ForeColor = $script:UiTextMuted
+    $lblStatus.Text = ($statusLines -join [Environment]::NewLine)
+    $dlg.Controls.Add($lblStatus)
+
+    $lblSteps = New-Object System.Windows.Forms.Label
+    $lblSteps.Location = New-Object System.Drawing.Point(20, 158)
+    $lblSteps.Size = New-Object System.Drawing.Size(470, 88)
+    $lblSteps.ForeColor = $script:UiTextPrimary
+    $lblSteps.Text = @(
+        '1. Download and install Cursor IDE.'
+        '2. Open Cursor, press Ctrl+Shift+P, run "Shell Command: Install ''cursor'' command in PATH".'
+        '3. Click Check again below, or set CURSOR_BIN to your Cursor.exe path.'
+    ) -join [Environment]::NewLine
+    $dlg.Controls.Add($lblSteps)
+
+    $btnDownload = New-Object System.Windows.Forms.Button
+    $btnDownload.Text = 'Open download page'
+    $btnDownload.Location = New-Object System.Drawing.Point(20, 262)
+    $btnDownload.Size = New-Object System.Drawing.Size(150, 28)
+    $btnDownload.Add_Click({
+        try {
+            Start-Process $script:CursorDownloadUrl
+        }
+        catch {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Could not open browser:`n$($_.Exception.Message)",
+                'Error',
+                'OK',
+                'Error') | Out-Null
+        }
+    })
+    $dlg.Controls.Add($btnDownload)
+
+    $btnRecheck = New-Object System.Windows.Forms.Button
+    $btnRecheck.Text = 'Check again'
+    $btnRecheck.Location = New-Object System.Drawing.Point(180, 262)
+    $btnRecheck.Size = New-Object System.Drawing.Size(100, 28)
+    $btnRecheck.Add_Click({
+        $refreshed = Get-CursorInstallInfo -ForceRefresh
+        Update-CursorInstallUi
+
+        $ideVer = if ($refreshed.IdeVersion) { " ($($refreshed.IdeVersion))" } else { '' }
+        $cliVer = if ($refreshed.CliVersion) { " ($($refreshed.CliVersion))" } else { '' }
+        $newStatus = @()
+        if ($refreshed.IdePath) {
+            $newStatus += "IDE: $($refreshed.IdePath)$ideVer"
+        }
+        else {
+            $newStatus += 'IDE: not found'
+        }
+        if ($refreshed.CliPath) {
+            $newStatus += "CLI: $($refreshed.CliPath)$cliVer"
+        }
+        else {
+            $newStatus += 'CLI: not found on PATH (install from Cursor after IDE setup)'
+        }
+        $lblStatus.Text = ($newStatus -join [Environment]::NewLine)
+
+        if ($refreshed.IsInstalled) {
+            [System.Windows.Forms.MessageBox]::Show(
+                'Cursor IDE is installed. You can add, edit, and start profiles now.',
+                'Cursor ready',
+                'OK',
+                'Information') | Out-Null
+            $dlg.DialogResult = [System.Windows.Forms.DialogResult]::OK
+            $dlg.Close()
+        }
+    })
+    $dlg.Controls.Add($btnRecheck)
+
+    $btnClose = New-Object System.Windows.Forms.Button
+    $btnClose.Text = 'Close'
+    $btnClose.Location = New-Object System.Drawing.Point(410, 262)
+    $btnClose.Size = New-Object System.Drawing.Size(80, 28)
+    $btnClose.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $dlg.Controls.Add($btnClose)
+    $dlg.CancelButton = $btnClose
+
+    if ($form) {
+        [void]$dlg.ShowDialog($form)
+    }
+    else {
+        [void]$dlg.ShowDialog()
+    }
+    $dlg.Dispose()
+}
+
+function Test-CursorInstallReady {
+    $info = Get-CursorInstallInfo
+    if ($info.IsInstalled) { return $true }
+
+    Show-CursorInstallDialog
+    $info = Get-CursorInstallInfo -ForceRefresh
+    Update-CursorInstallUi
+    return $info.IsInstalled
+}
+
 function Get-UserDataDirInstanceCounts {
     # Count Cursor windows per user-data-dir via --type=renderer processes. Electron keeps
     # one main process per profile; each additional window is a renderer child.
@@ -1258,6 +1527,8 @@ function Invoke-CloseAllCursorProfileInstances {
 function Edit-Profile {
     param([Parameter(Mandatory)][PSCustomObject]$Profile)
 
+    if (-not (Test-CursorInstallReady)) { return $false }
+
     $result = Show-ProfileDialog -Existing $Profile
     if ($result) {
         $Profile.Name = $result.Name
@@ -1394,12 +1665,9 @@ function Start-CursorProfileInstance {
 
     $cursor = Find-CursorExecutable
     if (-not $cursor) {
-        [System.Windows.Forms.MessageBox]::Show(
-            "Cursor executable not found. Set the CURSOR_BIN environment variable or install Cursor.",
-            'Cursor not found',
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
-        return
+        if (-not (Test-CursorInstallReady)) { return }
+        $cursor = Find-CursorExecutable
+        if (-not $cursor) { return }
     }
 
     if (-not (Test-Path $Profile.UserDataDir)) {
@@ -1702,23 +1970,38 @@ $script:CheckUpdateLink.Add_LinkClicked({
     }
 })
 
+$script:CursorInstallLink = New-Object System.Windows.Forms.LinkLabel
+$script:CursorInstallLink.AutoSize = $true
+$script:CursorInstallLink.Dock = [System.Windows.Forms.DockStyle]::Right
+$script:CursorInstallLink.Padding = New-Object System.Windows.Forms.Padding(0, 7, 12, 0)
+$script:CursorInstallLink.BackColor = $script:UiPanelColor
+$script:CursorInstallLink.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+$script:CursorInstallLink.Add_LinkClicked({
+    $info = Get-CursorInstallInfo
+    if ($info.IsInstalled -and $info.HasCli) { return }
+    Show-CursorInstallDialog
+    Update-CursorInstallUi
+})
+[void](Get-CursorInstallInfo -ForceRefresh)
+Set-CursorInstallLinkDisplay
+
 $statusPanel.Controls.Add($script:CheckUpdateLink)
+$statusPanel.Controls.Add($script:CursorInstallLink)
 $statusPanel.Controls.Add($lblStatus)
 
 $toolbarPanel = New-Object System.Windows.Forms.Panel
 $toolbarPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
-$toolbarPanel.Height = 102
+$toolbarPanel.Height = 94
 $toolbarPanel.BackColor = $script:UiPanelColor
 $toolbarPanel.Padding = New-Object System.Windows.Forms.Padding(14, 8, 14, 8)
 
 $script:ToolbarTable = New-Object System.Windows.Forms.TableLayoutPanel
 $script:ToolbarTable.Dock = [System.Windows.Forms.DockStyle]::Fill
-$script:ToolbarTable.RowCount = 3
+$script:ToolbarTable.RowCount = 2
 $script:ToolbarTable.ColumnCount = 1
 $script:ToolbarTable.Margin = New-Object System.Windows.Forms.Padding 0
 $script:ToolbarTable.Padding = New-Object System.Windows.Forms.Padding 0
 [void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 38)))
-[void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 1)))
 [void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 38)))
 [void]$script:ToolbarTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
 
@@ -1751,12 +2034,6 @@ $script:ProfileTable.Controls.Add($script:ProfileFlow, 1, 0)
 $script:ProfileTable.Controls.Add($script:StartHost, 2, 0)
 $script:ToolbarTable.Controls.Add($script:ProfileTable, 0, 0)
 
-$script:ToolbarRowSep = New-Object System.Windows.Forms.Panel
-$script:ToolbarRowSep.Dock = [System.Windows.Forms.DockStyle]::Fill
-$script:ToolbarRowSep.Margin = New-Object System.Windows.Forms.Padding 0, 3, 0, 3
-$script:ToolbarRowSep.BackColor = $script:UiBorderColor
-$script:ToolbarTable.Controls.Add($script:ToolbarRowSep, 0, 1)
-
 $script:LaunchTable = New-Object System.Windows.Forms.TableLayoutPanel
 $script:LaunchTable.Dock = [System.Windows.Forms.DockStyle]::Fill
 $script:LaunchTable.RowCount = 1
@@ -1784,7 +2061,7 @@ $script:LblLaunchHint.AutoEllipsis = $true
 
 $script:LaunchTable.Controls.Add($script:ThemeFlow, 0, 0)
 $script:LaunchTable.Controls.Add($script:LblLaunchHint, 1, 0)
-$script:ToolbarTable.Controls.Add($script:LaunchTable, 0, 2)
+$script:ToolbarTable.Controls.Add($script:LaunchTable, 0, 1)
 $toolbarPanel.Controls.Add($script:ToolbarTable)
 
 $toolbarSep = New-Object System.Windows.Forms.Panel
@@ -2053,6 +2330,7 @@ function Start-ProfileFromGridRow {
 
     $profile = Get-ProfileFromGridRow -RowIndex $RowIndex
     if (-not $profile) { return $false }
+    if (-not (Test-CursorInstallReady)) { return $false }
     Start-CursorProfileInstance -Profile $profile
     Request-DeferredGridRefresh
     return $true
@@ -2129,6 +2407,8 @@ $script:StartHost.Add_Resize({
 Apply-ToolbarTheme
 
 $btnAdd.Add_Click({
+    if (-not (Test-CursorInstallReady)) { return }
+
     $result = Show-ProfileDialog -Existing $null
     if ($result) {
         if ($script:Profiles | Where-Object { $_.Name -eq $result.Name }) {
@@ -2148,11 +2428,16 @@ $btnStart.Add_Click({
         [System.Windows.Forms.MessageBox]::Show('Select a profile to start.', 'No selection', 'OK', 'Information') | Out-Null
         return
     }
+    if (-not (Test-CursorInstallReady)) { return }
     Start-CursorProfileInstance -Profile $selected
     Request-DeferredGridRefresh
 })
 
-$btnRefresh.Add_Click({ Update-ProfileGrid })
+$btnRefresh.Add_Click({
+    [void](Get-CursorInstallInfo -ForceRefresh)
+    Update-CursorInstallUi
+    Update-ProfileGrid
+})
 
 $grid.Add_CellContentClick({
     param($sender, $e)
@@ -2199,6 +2484,9 @@ $form.Add_FormClosing({
     $processEventDebounce.Stop()
     Stop-CursorProcessWatchers
 })
+
+[void](Get-CursorInstallInfo -ForceRefresh)
+Update-CursorInstallUi
 
 Update-ProfileGrid
 

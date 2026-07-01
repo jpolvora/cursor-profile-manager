@@ -50,6 +50,7 @@ Re-run after moving this folder to repair the shortcut.
 | **Persistence** | Profiles saved to `profiles.json` in the profiles directory |
 | **Theme** | Light, dark, or **System default** (follows Windows app theme); bottom-toolbar dropdown; saved in `settings.json` |
 | **Check for updates** | Footer link (with current `v#.#.#` beside it) compares `App-Version` markers against GitHub `master` and overwrites the install folder in place (`.bat` and Desktop shortcuts keep working) |
+| **Cursor dependency** | Footer shows Cursor IDE version and CLI status; **Install Cursor** dialog when missing; Add, Edit, and Start blocked until IDE is detected |
 | **Safe delete** | Optional data-folder removal; blocked while any instance is running |
 
 ## Usage
@@ -93,6 +94,8 @@ The UI grid is driven by an in-memory model; the grid is touched only when that 
 |----------|-------------|
 | `CURSOR_PROFILES_DIR` | Root for profile folders and `profiles.json` |
 | `CURSOR_BIN` | Path to `Cursor.exe` (auto-detected if unset) |
+
+Cursor IDE is auto-detected under `%LOCALAPPDATA%\Programs\cursor\` (or `Cursor\`), then `cursor` on PATH. The footer shows the detected version; the **cursor** CLI is checked on PATH or beside the IDE install. Use **Install Cursor** in the footer if neither is found.
 
 ### `profiles.json`
 
