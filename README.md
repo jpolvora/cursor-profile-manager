@@ -8,12 +8,15 @@ Tested with **Cursor 3.9+** (uses `--user-data-dir`; the legacy `--max-memory` f
 
 Each profile gets its own folder under `%USERPROFILE%\.cursor-profiles\` (override with `CURSOR_PROFILES_DIR`). That lets several Cursor windows open the **same project** at once without sharing account, extensions, or chat history.
 
+The Profile Manager itself is a **single-instance app**: only one manager window runs at a time. Launching it again (shortcut, `.bat`, or script) brings the existing window to the front.
+
 ## Benefits
 
 - **Multiple Cursors on one codebase** — parallel work in separate windows
 - **Separate accounts** — work vs. personal, or different clients (sign in once per profile)
 - **Custom user-data dirs** — pick any folder per profile
 - **Parallel AI assistance** — independent agent/chat context per instance
+- **Multiple windows per profile** — start the same profile more than once when needed
 
 ## Quick start
 
@@ -33,19 +36,27 @@ Re-run after moving this folder to repair the shortcut.
 
 ## Features
 
-- **Add / Edit / Delete** profiles (name, user-data-dir, default project folder, notes)
-- **Start ▶** (or double-click a row) opens that profile in a new Cursor window
-- **Live status** — `● Running` / `○ Idle`, refreshed every 5s from `Cursor.exe` command lines
-- Profiles saved to `profiles.json` in the profiles directory
-- Delete optionally removes the profile's data folder (with confirmation); blocked while running
+| Feature | Description |
+|---------|-------------|
+| **Profile CRUD** | Add, edit, delete profiles (name, user-data-dir, default project folder, notes) |
+| **Start ▶** | Opens another Cursor window for the selected profile (`--new-window`; multiple instances allowed) |
+| **Double-click row** | Same as Start |
+| **Status column** | `● Running` / `○ Idle` from live `Cursor.exe` process inspection |
+| **Instances column** | Count of running windows per profile (0, 1, 2, …) |
+| **Live updates** | WMI process create/exit events + 2 s fallback poll; grid updates only when data changes |
+| **Tray notifications** | Balloon when instances start, stop, or the count changes |
+| **Single instance** | Second launch activates the existing manager window |
+| **Persistence** | Profiles saved to `profiles.json` in the profiles directory |
+| **Safe delete** | Optional data-folder removal; blocked while any instance is running |
 
 ## Usage
 
 1. Open the Profile Manager.
 2. Add a profile (name auto-suggests a folder under `.cursor-profiles\`).
 3. Optionally set a default project folder.
-4. Click **Start ▶** — Cursor opens with `--user-data-dir` and `--new-window`.
-5. On first launch, sign in with the account for that profile; settings and extensions persist there.
+4. Click **Start ▶** (or double-click the row) — Cursor opens with `--user-data-dir` and `--new-window`.
+5. Click **Start ▶** again to open another window for the same profile.
+6. On first launch, sign in with the account for that profile; settings and extensions persist there.
 
 ## Technical details
 
@@ -58,6 +69,17 @@ Cursor.exe --user-data-dir "<profile-dir>" --new-window [project-path]
 Each profile keeps its own extensions, window layout, session history, and login.
 
 This tool uses **separate `--user-data-dir` folders**, not Cursor 3.x's built-in `--profile` flag, so login and on-disk data stay fully isolated.
+
+### Runtime detection
+
+Running profiles are detected by parsing `Cursor.exe` command lines for `--user-data-dir`. The **Instances** count is the number of matching processes (one per window in typical use).
+
+Status refresh uses:
+
+1. **WMI** — `__InstanceCreationEvent` / `__InstanceDeletionEvent` on `Cursor.exe` (debounced ~500 ms)
+2. **Fallback timer** — poll every 2 s if an event is missed
+
+The UI grid is driven by an in-memory model; the grid is touched only when that model changes (no full redraw on idle polls).
 
 ### Environment variables
 
@@ -83,7 +105,7 @@ Stored at `<CURSOR_PROFILES_DIR>\profiles.json`:
 ]
 ```
 
-Editable by hand; safe to back up or sync across machines.
+Editable by hand; safe to back up or sync across machines. Read/write uses **UTF-8**.
 
 ### Manual launch (without the GUI)
 
@@ -93,10 +115,20 @@ Editable by hand; safe to back up or sync across machines.
   --new-window L:\source\my-project
 ```
 
+## Project files
+
+| File | Purpose |
+|------|---------|
+| `cursor-profile-manager.ps1` | Main WinForms GUI |
+| `cursor-profile-manager.bat` | Hidden PowerShell launcher |
+| `install-desktop-shortcut.ps1` | Creates/repairs a Desktop shortcut |
+| `CHANGELOG.md` | User-facing change history |
+| `AGENTS.md` | Guide for AI agents and PowerShell conventions in this repo |
+
 ## Notes
 
-- **Windows only** — WinForms GUI; requires PowerShell 5.1+.
-- Each running profile is a separate Electron process (~500MB+ RAM).
+- **Windows only** — WinForms GUI; requires **Windows PowerShell 5.1+** (built into Windows).
+- Each running profile is a separate Electron process (~500 MB+ RAM).
 - Extensions are duplicated per profile on disk.
 - Terminal `cursor` always uses the default profile — use this manager for extra instances.
 

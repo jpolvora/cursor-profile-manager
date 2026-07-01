@@ -16,6 +16,87 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
+$AppWindowTitle = 'Cursor Profile Manager'
+$SingleInstanceMutexName = 'Local\CursorProfileManager_GUI_v1'
+
+function Show-ExistingAppWindow {
+    param([Parameter(Mandatory)][string]$WindowTitle)
+
+    if (-not ('Win32AppFocus' -as [type])) {
+        Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class Win32AppFocus {
+    public const int SW_RESTORE = 9;
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern IntPtr FindWindow(string lpClassName, string lpWindowTitle);
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool BringWindowToTop(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr processId);
+    [DllImport("kernel32.dll")]
+    public static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")]
+    public static extern bool AttachThreadInput(uint attachThread, uint attachToThread, bool attach);
+    public static void ForceForegroundWindow(IntPtr hWnd) {
+        if (hWnd == IntPtr.Zero) { return; }
+        if (IsIconic(hWnd)) {
+            ShowWindow(hWnd, SW_RESTORE);
+        }
+        IntPtr foreground = GetForegroundWindow();
+        uint foregroundThread = GetWindowThreadProcessId(foreground, IntPtr.Zero);
+        uint currentThread = GetCurrentThreadId();
+        if (foregroundThread != 0 && foregroundThread != currentThread) {
+            AttachThreadInput(currentThread, foregroundThread, true);
+            BringWindowToTop(hWnd);
+            SetForegroundWindow(hWnd);
+            AttachThreadInput(currentThread, foregroundThread, false);
+        }
+        else {
+            BringWindowToTop(hWnd);
+            SetForegroundWindow(hWnd);
+        }
+    }
+}
+'@
+    }
+
+    for ($attempt = 0; $attempt -lt 15; $attempt++) {
+        $hwnd = [Win32AppFocus]::FindWindow($null, $WindowTitle)
+        if ($hwnd -ne [IntPtr]::Zero) {
+            [Win32AppFocus]::ForceForegroundWindow($hwnd)
+            return $true
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    return $false
+}
+
+function Initialize-SingleInstance {
+    param([Parameter(Mandatory)][string]$MutexName)
+
+    $createdNew = $false
+    $mutex = New-Object System.Threading.Mutex($true, $MutexName, [ref]$createdNew)
+    if ($createdNew) {
+        $script:AppInstanceMutex = $mutex
+        return
+    }
+
+    $mutex.Dispose()
+    [void](Show-ExistingAppWindow -WindowTitle $AppWindowTitle)
+    exit 0
+}
+
+[void](Initialize-SingleInstance -MutexName $SingleInstanceMutexName)
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -102,25 +183,91 @@ function Find-CursorExecutable {
     return $null
 }
 
-function Get-RunningUserDataDirs {
-    # Returns a set of user-data-dir paths currently running, normalized (lowercase, no trailing slash)
-    $dirs = New-Object 'System.Collections.Generic.HashSet[string]'
+function Get-UserDataDirInstanceCounts {
+    # Returns normalized user-data-dir path -> number of Cursor.exe processes using it.
+    $counts = @{}
     $procs = Get-CimInstance Win32_Process -Filter "name='Cursor.exe'" -ErrorAction SilentlyContinue
     foreach ($p in $procs) {
         $cmd = $p.CommandLine
-        if ($cmd -and $cmd -match '--user-data-dir[= ]"?([^"]+?)"?(\s--|\s*$)') {
-            $dir = $matches[1].TrimEnd('\', '/')
-            [void]$dirs.Add($dir.ToLowerInvariant())
+        if ($cmd -and $cmd -match '--user-data-dir[= ]"?([^"]+?)"?(\s--|\s|$)') {
+            $dir = $matches[1].TrimEnd('\', '/').ToLowerInvariant()
+            if ($counts.ContainsKey($dir)) {
+                $counts[$dir]++
+            }
+            else {
+                $counts[$dir] = 1
+            }
         }
     }
-    return $dirs
+    return $counts
 }
 
-function Test-ProfileRunning {
-    param([string]$UserDataDir, [System.Collections.Generic.HashSet[string]]$RunningDirs)
-    if (-not $UserDataDir) { return $false }
+function Get-ProfileInstanceCount {
+    param([string]$UserDataDir, [hashtable]$InstanceCounts)
+    if (-not $UserDataDir) { return 0 }
     $norm = $UserDataDir.TrimEnd('\', '/').ToLowerInvariant()
-    return $RunningDirs.Contains($norm)
+    if ($InstanceCounts.ContainsKey($norm)) {
+        return [int]$InstanceCounts[$norm]
+    }
+    return 0
+}
+
+function Show-ProfileNotification {
+    param(
+        [Parameter(Mandatory)][string]$Title,
+        [Parameter(Mandatory)][string]$Message
+    )
+    if (-not $script:NotifyIcon) { return }
+    $script:NotifyIcon.ShowBalloonTip(4000, $Title, $Message, [System.Windows.Forms.ToolTipIcon]::Info)
+}
+
+function Start-CursorProcessWatchers {
+    param(
+        [System.Windows.Forms.Form]$OwnerForm,
+        [System.Windows.Forms.Timer]$DebounceTimer
+    )
+
+    $handler = [System.Management.EventArrivedEventHandler]{
+        param($sender, $e)
+        if ($OwnerForm.IsDisposed) { return }
+        if ($OwnerForm.InvokeRequired) {
+            [void]$OwnerForm.BeginInvoke([Action]{
+                $DebounceTimer.Stop()
+                $DebounceTimer.Start()
+            })
+        }
+        else {
+            $DebounceTimer.Stop()
+            $DebounceTimer.Start()
+        }
+    }
+
+    $queries = @(
+        "SELECT * FROM __InstanceCreationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process' AND TargetInstance.Name='Cursor.exe'",
+        "SELECT * FROM __InstanceDeletionEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process' AND TargetInstance.Name='Cursor.exe'"
+    )
+
+    $script:ProcessEventWatchers = @()
+    foreach ($queryText in $queries) {
+        $watcher = New-Object System.Management.ManagementEventWatcher
+        $watcher.Query = New-Object System.Management.WqlEventQuery($queryText)
+        $watcher.add_EventArrived($handler)
+        $watcher.Start()
+        $script:ProcessEventWatchers += $watcher
+    }
+}
+
+function Stop-CursorProcessWatchers {
+    if ($script:ProcessEventWatchers) {
+        foreach ($watcher in $script:ProcessEventWatchers) {
+            try {
+                $watcher.Stop()
+                $watcher.Dispose()
+            }
+            catch { }
+        }
+        $script:ProcessEventWatchers = $null
+    }
 }
 
 function Start-CursorProfileInstance {
@@ -342,7 +489,7 @@ function Show-ProfileDialog {
 $script:Profiles = Load-Profiles
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'Cursor Profile Manager'
+$form.Text = $AppWindowTitle
 $form.Size = New-Object System.Drawing.Size(820, 480)
 $form.StartPosition = 'CenterScreen'
 $form.MinimumSize = New-Object System.Drawing.Size(700, 380)
@@ -360,30 +507,237 @@ $grid.AutoSizeColumnsMode = 'Fill'
 $grid.RowHeadersVisible = $false
 
 [void]$grid.Columns.Add('Status', 'Status')
+[void]$grid.Columns.Add('Instances', 'Instances')
 [void]$grid.Columns.Add('Name', 'Name')
 [void]$grid.Columns.Add('UserDataDir', 'User data dir')
 [void]$grid.Columns.Add('ProjectPath', 'Project')
 [void]$grid.Columns.Add('Notes', 'Notes')
 $grid.Columns['Status'].FillWeight = 60
-$grid.Columns['Name'].FillWeight = 110
-$grid.Columns['UserDataDir'].FillWeight = 220
-$grid.Columns['ProjectPath'].FillWeight = 180
-$grid.Columns['Notes'].FillWeight = 140
+$grid.Columns['Instances'].FillWeight = 50
+$grid.Columns['Instances'].DefaultCellStyle.Alignment = [System.Windows.Forms.DataGridViewContentAlignment]::MiddleCenter
+$grid.Columns['Name'].FillWeight = 100
+$grid.Columns['UserDataDir'].FillWeight = 200
+$grid.Columns['ProjectPath'].FillWeight = 160
+$grid.Columns['Notes'].FillWeight = 130
+
+# Reduce paint flicker during frequent status updates.
+$grid.GetType().GetProperty('DoubleBuffered', [System.Reflection.BindingFlags]'Instance, NonPublic').SetValue($grid, $true, $null)
 
 $form.Controls.Add($grid)
 
-function Refresh-Grid {
-    $grid.Rows.Clear()
-    $running = Get-RunningUserDataDirs
+$script:GridModel = $null
+$script:DefaultGridForeColor = $grid.DefaultCellStyle.ForeColor
+$script:RunningGridForeColor = [System.Drawing.Color]::SeaGreen
+
+function New-GridRowModel {
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$Profile,
+        [Parameter(Mandatory)][int]$InstanceCount
+    )
+
+    $isRunning = $InstanceCount -gt 0
+    return [PSCustomObject]@{
+        Id          = $Profile.Id
+        Status      = if ($isRunning) { $UiStatusRunning } else { $UiStatusIdle }
+        Instances   = $InstanceCount
+        Name        = $Profile.Name
+        UserDataDir = $Profile.UserDataDir
+        ProjectPath = $Profile.ProjectPath
+        Notes       = $Profile.Notes
+        IsRunning   = $isRunning
+    }
+}
+
+function Build-GridModel {
+    $instanceCounts = Get-UserDataDirInstanceCounts
+    $order = New-Object 'System.Collections.Generic.List[string]'
+    $rowsById = @{}
+
     foreach ($p in $script:Profiles) {
-        $isRunning = Test-ProfileRunning -UserDataDir $p.UserDataDir -RunningDirs $running
-        $statusText = if ($isRunning) { $UiStatusRunning } else { $UiStatusIdle }
-        $rowIdx = $grid.Rows.Add($statusText, $p.Name, $p.UserDataDir, $p.ProjectPath, $p.Notes)
-        $grid.Rows[$rowIdx].Tag = $p.Id
-        if ($isRunning) {
-            $grid.Rows[$rowIdx].Cells['Status'].Style.ForeColor = [System.Drawing.Color]::SeaGreen
+        $instanceCount = Get-ProfileInstanceCount -UserDataDir $p.UserDataDir -InstanceCounts $instanceCounts
+        $row = New-GridRowModel -Profile $p -InstanceCount $instanceCount
+        $order.Add($p.Id)
+        $rowsById[$p.Id] = $row
+    }
+
+    return [PSCustomObject]@{
+        Order    = $order
+        RowsById = $rowsById
+    }
+}
+
+function Test-GridRowModelEqual {
+    param(
+        [PSCustomObject]$A,
+        [PSCustomObject]$B
+    )
+
+    return $A.Status -eq $B.Status -and
+        $A.Instances -eq $B.Instances -and
+        $A.Name -eq $B.Name -and
+        $A.UserDataDir -eq $B.UserDataDir -and
+        $A.ProjectPath -eq $B.ProjectPath -and
+        $A.Notes -eq $B.Notes
+}
+
+function Test-GridModelEqual {
+    param(
+        [PSCustomObject]$A,
+        [PSCustomObject]$B
+    )
+
+    if ($A.Order.Count -ne $B.Order.Count) { return $false }
+    for ($i = 0; $i -lt $A.Order.Count; $i++) {
+        $id = $A.Order[$i]
+        if ($B.Order[$i] -ne $id) { return $false }
+        if (-not (Test-GridRowModelEqual -A $A.RowsById[$id] -B $B.RowsById[$id])) {
+            return $false
         }
     }
+    return $true
+}
+
+function Notify-InstanceCountChange {
+    param(
+        [string]$ProfileName,
+        [int]$PreviousCount,
+        [int]$CurrentCount
+    )
+
+    if ($CurrentCount -eq 0) {
+        Show-ProfileNotification -Title 'Profile stopped' -Message "$ProfileName is now idle."
+        return
+    }
+
+    if ($PreviousCount -eq 0) {
+        $suffix = if ($CurrentCount -eq 1) { '' } else { 's' }
+        Show-ProfileNotification -Title 'Profile started' -Message "$ProfileName is running ($CurrentCount instance$suffix)."
+        return
+    }
+
+    if ($CurrentCount -gt $PreviousCount) {
+        Show-ProfileNotification -Title 'Instance started' -Message "$ProfileName now has $CurrentCount running instances."
+        return
+    }
+
+    $suffix = if ($CurrentCount -eq 1) { '' } else { 's' }
+    Show-ProfileNotification -Title 'Instance closed' -Message "$ProfileName has $CurrentCount running instance$suffix."
+}
+
+function Invoke-GridModelNotifications {
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$PreviousModel,
+        [Parameter(Mandatory)][PSCustomObject]$NewModel
+    )
+
+    foreach ($id in $NewModel.Order) {
+        $previousCount = 0
+        if ($PreviousModel.RowsById.ContainsKey($id)) {
+            $previousCount = [int]$PreviousModel.RowsById[$id].Instances
+        }
+        $currentCount = [int]$NewModel.RowsById[$id].Instances
+        if ($previousCount -ne $currentCount) {
+            Notify-InstanceCountChange -ProfileName $NewModel.RowsById[$id].Name -PreviousCount $previousCount -CurrentCount $currentCount
+        }
+    }
+}
+
+function Sync-GridRowToView {
+    param(
+        [System.Windows.Forms.DataGridViewRow]$Row,
+        [PSCustomObject]$ModelRow
+    )
+
+    $foreColor = if ($ModelRow.IsRunning) { $script:RunningGridForeColor } else { $script:DefaultGridForeColor }
+    $cells = $Row.Cells
+
+    if ([string]$cells['Status'].Value -ne $ModelRow.Status) {
+        $cells['Status'].Value = $ModelRow.Status
+    }
+    if ([string]$cells['Instances'].Value -ne [string]$ModelRow.Instances) {
+        $cells['Instances'].Value = [string]$ModelRow.Instances
+    }
+    if ([string]$cells['Name'].Value -ne $ModelRow.Name) {
+        $cells['Name'].Value = $ModelRow.Name
+    }
+    if ([string]$cells['UserDataDir'].Value -ne $ModelRow.UserDataDir) {
+        $cells['UserDataDir'].Value = $ModelRow.UserDataDir
+    }
+    if ([string]$cells['ProjectPath'].Value -ne $ModelRow.ProjectPath) {
+        $cells['ProjectPath'].Value = $ModelRow.ProjectPath
+    }
+    if ([string]$cells['Notes'].Value -ne $ModelRow.Notes) {
+        $cells['Notes'].Value = $ModelRow.Notes
+    }
+    if ($cells['Status'].Style.ForeColor -ne $foreColor) {
+        $cells['Status'].Style.ForeColor = $foreColor
+        $cells['Instances'].Style.ForeColor = $foreColor
+    }
+}
+
+function Apply-GridModelToView {
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$Model,
+        [PSCustomObject]$PreviousModel
+    )
+
+    $existingRows = @{}
+    foreach ($row in $grid.Rows) {
+        if ($null -ne $row.Tag) {
+            $existingRows[$row.Tag] = $row
+        }
+    }
+
+    $grid.SuspendLayout()
+    try {
+        foreach ($id in $Model.Order) {
+            $modelRow = $Model.RowsById[$id]
+            $previousRow = if ($PreviousModel) { $PreviousModel.RowsById[$id] } else { $null }
+
+            if ($existingRows.ContainsKey($id)) {
+                $row = $existingRows[$id]
+                [void]$existingRows.Remove($id)
+            }
+            else {
+                $rowIdx = $grid.Rows.Add('', '', '', '', '', '')
+                $row = $grid.Rows[$rowIdx]
+                $row.Tag = $id
+            }
+
+            if (-not $previousRow -or -not (Test-GridRowModelEqual -A $previousRow -B $modelRow)) {
+                Sync-GridRowToView -Row $row -ModelRow $modelRow
+            }
+        }
+
+        foreach ($staleId in @($existingRows.Keys)) {
+            $grid.Rows.Remove($existingRows[$staleId])
+        }
+    }
+    finally {
+        $grid.ResumeLayout($true)
+    }
+}
+
+function Update-ProfileGrid {
+    $newModel = Build-GridModel
+    $previousModel = $script:GridModel
+
+    if ($previousModel -and (Test-GridModelEqual -A $previousModel -B $newModel)) {
+        return
+    }
+
+    if ($previousModel) {
+        Invoke-GridModelNotifications -PreviousModel $previousModel -NewModel $newModel
+    }
+
+    Apply-GridModelToView -Model $newModel -PreviousModel $previousModel
+    $script:GridModel = $newModel
+}
+
+function Request-DeferredGridRefresh {
+    Update-ProfileGrid
+    $script:ProcessEventDebounceTimer.Stop()
+    $script:ProcessEventDebounceTimer.Start()
 }
 
 function Get-SelectedProfile {
@@ -446,7 +800,7 @@ $btnAdd.Add_Click({
         $newProfile = New-ProfileObject -Name $result.Name -UserDataDir $result.UserDataDir -ProjectPath $result.ProjectPath -Notes $result.Notes
         $script:Profiles = @($script:Profiles) + $newProfile
         Save-Profiles -Profiles $script:Profiles
-        Refresh-Grid
+        Update-ProfileGrid
     }
 })
 
@@ -463,7 +817,7 @@ $btnEdit.Add_Click({
         $selected.ProjectPath = $result.ProjectPath
         $selected.Notes = $result.Notes
         Save-Profiles -Profiles $script:Profiles
-        Refresh-Grid
+        Update-ProfileGrid
     }
 })
 
@@ -474,9 +828,14 @@ $btnDelete.Add_Click({
         return
     }
 
-    $running = Get-RunningUserDataDirs
-    if (Test-ProfileRunning -UserDataDir $selected.UserDataDir -RunningDirs $running) {
-        [System.Windows.Forms.MessageBox]::Show("Close the running Cursor window for '$($selected.Name)' before deleting it.", 'Profile is running', 'OK', 'Warning') | Out-Null
+    $instanceCounts = Get-UserDataDirInstanceCounts
+    $instanceCount = Get-ProfileInstanceCount -UserDataDir $selected.UserDataDir -InstanceCounts $instanceCounts
+    if ($instanceCount -gt 0) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Close all running Cursor windows for '$($selected.Name)' ($instanceCount instance$(if ($instanceCount -ne 1) { 's' })) before deleting it.",
+            'Profile is running',
+            'OK',
+            'Warning') | Out-Null
         return
     }
 
@@ -504,7 +863,7 @@ $btnDelete.Add_Click({
 
     $script:Profiles = @($script:Profiles | Where-Object { $_.Id -ne $selected.Id })
     Save-Profiles -Profiles $script:Profiles
-    Refresh-Grid
+    Update-ProfileGrid
 })
 
 $btnStart.Add_Click({
@@ -514,11 +873,10 @@ $btnStart.Add_Click({
         return
     }
     Start-CursorProfileInstance -Profile $selected
-    Start-Sleep -Milliseconds 800
-    Refresh-Grid
+    Request-DeferredGridRefresh
 })
 
-$btnRefresh.Add_Click({ Refresh-Grid })
+$btnRefresh.Add_Click({ Update-ProfileGrid })
 
 $grid.Add_CellDoubleClick({
     param($s, $e)
@@ -526,18 +884,56 @@ $grid.Add_CellDoubleClick({
         $selected = Get-SelectedProfile
         if ($selected) {
             Start-CursorProfileInstance -Profile $selected
-            Start-Sleep -Milliseconds 800
-            Refresh-Grid
+            Request-DeferredGridRefresh
         }
     }
 })
 
+$processEventDebounce = New-Object System.Windows.Forms.Timer
+$processEventDebounce.Interval = 500
+$script:ProcessEventDebounceTimer = $processEventDebounce
+$processEventDebounce.Add_Tick({
+    $processEventDebounce.Stop()
+    Update-ProfileGrid
+})
+
 $refreshTimer = New-Object System.Windows.Forms.Timer
-$refreshTimer.Interval = 5000
-$refreshTimer.Add_Tick({ Refresh-Grid })
+$refreshTimer.Interval = 2000
+$refreshTimer.Add_Tick({ Update-ProfileGrid })
 $refreshTimer.Start()
-$form.Add_FormClosing({ $refreshTimer.Stop() })
 
-Refresh-Grid
+$script:NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
+$cursorIconPath = Find-CursorExecutable
+if ($cursorIconPath) {
+    $script:NotifyIcon.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($cursorIconPath)
+}
+else {
+    $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Application
+}
+$script:NotifyIcon.Visible = $true
 
-[void]$form.ShowDialog()
+Start-CursorProcessWatchers -OwnerForm $form -DebounceTimer $processEventDebounce
+
+$form.Add_FormClosing({
+    $refreshTimer.Stop()
+    $processEventDebounce.Stop()
+    Stop-CursorProcessWatchers
+    if ($script:NotifyIcon) {
+        $script:NotifyIcon.Visible = $false
+        $script:NotifyIcon.Dispose()
+        $script:NotifyIcon = $null
+    }
+})
+
+Update-ProfileGrid
+
+try {
+    [void]$form.ShowDialog()
+}
+finally {
+    if ($script:AppInstanceMutex) {
+        try { $script:AppInstanceMutex.ReleaseMutex() } catch { }
+        $script:AppInstanceMutex.Dispose()
+        $script:AppInstanceMutex = $null
+    }
+}
