@@ -184,21 +184,50 @@ function Find-CursorExecutable {
 }
 
 function Get-UserDataDirInstanceCounts {
-    # Returns normalized user-data-dir path -> number of Cursor.exe processes using it.
+    # Count Cursor windows per user-data-dir via --type=renderer processes. Electron keeps
+    # one main process per profile; each additional window is a renderer child.
     $counts = @{}
-    $procs = Get-CimInstance Win32_Process -Filter "name='Cursor.exe'" -ErrorAction SilentlyContinue
+    $procs = @(Get-CimInstance Win32_Process -Filter "name='Cursor.exe'" -ErrorAction SilentlyContinue)
+    if ($procs.Count -eq 0) { return $counts }
+
+    $cursorPids = @{}
+    foreach ($p in $procs) {
+        $cursorPids[$p.ProcessId] = $true
+    }
+
+    $mainByDir = @{}
     foreach ($p in $procs) {
         $cmd = $p.CommandLine
-        if ($cmd -and $cmd -match '--user-data-dir[= ]"?([^"]+?)"?(\s--|\s|$)') {
-            $dir = $matches[1].TrimEnd('\', '/').ToLowerInvariant()
-            if ($counts.ContainsKey($dir)) {
-                $counts[$dir]++
-            }
-            else {
-                $counts[$dir] = 1
-            }
+        if (-not $cmd -or $cmd -notmatch '--user-data-dir[= ]"?([^"]+?)"?(\s--|\s|$)') { continue }
+        if ($cmd -match '--type=') { continue }
+        if ($cursorPids.ContainsKey($p.ParentProcessId)) { continue }
+
+        $dir = $matches[1].TrimEnd('\', '/').ToLowerInvariant()
+        $mainByDir[$dir] = $true
+    }
+
+    foreach ($p in $procs) {
+        $cmd = $p.CommandLine
+        if (-not $cmd -or $cmd -notmatch '--type=renderer') { continue }
+        if ($cmd -notmatch '--user-data-dir[= ]"?([^"]+?)"?(\s--|\s|$)') { continue }
+
+        $dir = $matches[1].TrimEnd('\', '/').ToLowerInvariant()
+        if (-not $mainByDir.ContainsKey($dir)) { continue }
+
+        if ($counts.ContainsKey($dir)) {
+            $counts[$dir]++
+        }
+        else {
+            $counts[$dir] = 1
         }
     }
+
+    foreach ($dir in $mainByDir.Keys) {
+        if (-not $counts.ContainsKey($dir)) {
+            $counts[$dir] = 1
+        }
+    }
+
     return $counts
 }
 
@@ -210,15 +239,6 @@ function Get-ProfileInstanceCount {
         return [int]$InstanceCounts[$norm]
     }
     return 0
-}
-
-function Show-ProfileNotification {
-    param(
-        [Parameter(Mandatory)][string]$Title,
-        [Parameter(Mandatory)][string]$Message
-    )
-    if (-not $script:NotifyIcon) { return }
-    $script:NotifyIcon.ShowBalloonTip(4000, $Title, $Message, [System.Windows.Forms.ToolTipIcon]::Info)
 }
 
 function Start-CursorProcessWatchers {
@@ -289,11 +309,10 @@ function Start-CursorProfileInstance {
         New-Item -ItemType Directory -Path $Profile.UserDataDir -Force | Out-Null
     }
 
-    $argList = @('--user-data-dir', $Profile.UserDataDir, '--new-window')
-
+    $projectExists = $false
     if ($Profile.ProjectPath) {
         if (Test-Path $Profile.ProjectPath) {
-            $argList += $Profile.ProjectPath
+            $projectExists = $true
         }
         else {
             [System.Windows.Forms.MessageBox]::Show(
@@ -302,6 +321,23 @@ function Start-CursorProfileInstance {
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
         }
+    }
+
+    $instanceCounts = Get-UserDataDirInstanceCounts
+    $runningCount = Get-ProfileInstanceCount -UserDataDir $Profile.UserDataDir -InstanceCounts $instanceCounts
+
+    # Cursor/VS Code reuses the existing window when the same folder is already open,
+    # even with --new-window. Open an empty window, then --add the project folder.
+    if ($runningCount -gt 0 -and $projectExists) {
+        Start-Process -FilePath $cursor -ArgumentList @('--user-data-dir', $Profile.UserDataDir, '--new-window')
+        Start-Sleep -Milliseconds 800
+        Start-Process -FilePath $cursor -ArgumentList @('--user-data-dir', $Profile.UserDataDir, '--add', $Profile.ProjectPath)
+        return
+    }
+
+    $argList = @('--user-data-dir', $Profile.UserDataDir, '--new-window')
+    if ($projectExists) {
+        $argList += $Profile.ProjectPath
     }
 
     Start-Process -FilePath $cursor -ArgumentList $argList
@@ -597,51 +633,6 @@ function Test-GridModelEqual {
     return $true
 }
 
-function Notify-InstanceCountChange {
-    param(
-        [string]$ProfileName,
-        [int]$PreviousCount,
-        [int]$CurrentCount
-    )
-
-    if ($CurrentCount -eq 0) {
-        Show-ProfileNotification -Title 'Profile stopped' -Message "$ProfileName is now idle."
-        return
-    }
-
-    if ($PreviousCount -eq 0) {
-        $suffix = if ($CurrentCount -eq 1) { '' } else { 's' }
-        Show-ProfileNotification -Title 'Profile started' -Message "$ProfileName is running ($CurrentCount instance$suffix)."
-        return
-    }
-
-    if ($CurrentCount -gt $PreviousCount) {
-        Show-ProfileNotification -Title 'Instance started' -Message "$ProfileName now has $CurrentCount running instances."
-        return
-    }
-
-    $suffix = if ($CurrentCount -eq 1) { '' } else { 's' }
-    Show-ProfileNotification -Title 'Instance closed' -Message "$ProfileName has $CurrentCount running instance$suffix."
-}
-
-function Invoke-GridModelNotifications {
-    param(
-        [Parameter(Mandatory)][PSCustomObject]$PreviousModel,
-        [Parameter(Mandatory)][PSCustomObject]$NewModel
-    )
-
-    foreach ($id in $NewModel.Order) {
-        $previousCount = 0
-        if ($PreviousModel.RowsById.ContainsKey($id)) {
-            $previousCount = [int]$PreviousModel.RowsById[$id].Instances
-        }
-        $currentCount = [int]$NewModel.RowsById[$id].Instances
-        if ($previousCount -ne $currentCount) {
-            Notify-InstanceCountChange -ProfileName $NewModel.RowsById[$id].Name -PreviousCount $previousCount -CurrentCount $currentCount
-        }
-    }
-}
-
 function Sync-GridRowToView {
     param(
         [System.Windows.Forms.DataGridViewRow]$Row,
@@ -726,16 +717,11 @@ function Update-ProfileGrid {
         return
     }
 
-    if ($previousModel) {
-        Invoke-GridModelNotifications -PreviousModel $previousModel -NewModel $newModel
-    }
-
     Apply-GridModelToView -Model $newModel -PreviousModel $previousModel
     $script:GridModel = $newModel
 }
 
 function Request-DeferredGridRefresh {
-    Update-ProfileGrid
     $script:ProcessEventDebounceTimer.Stop()
     $script:ProcessEventDebounceTimer.Start()
 }
@@ -902,27 +888,12 @@ $refreshTimer.Interval = 2000
 $refreshTimer.Add_Tick({ Update-ProfileGrid })
 $refreshTimer.Start()
 
-$script:NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
-$cursorIconPath = Find-CursorExecutable
-if ($cursorIconPath) {
-    $script:NotifyIcon.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($cursorIconPath)
-}
-else {
-    $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Application
-}
-$script:NotifyIcon.Visible = $true
-
 Start-CursorProcessWatchers -OwnerForm $form -DebounceTimer $processEventDebounce
 
 $form.Add_FormClosing({
     $refreshTimer.Stop()
     $processEventDebounce.Stop()
     Stop-CursorProcessWatchers
-    if ($script:NotifyIcon) {
-        $script:NotifyIcon.Visible = $false
-        $script:NotifyIcon.Dispose()
-        $script:NotifyIcon = $null
-    }
 })
 
 Update-ProfileGrid

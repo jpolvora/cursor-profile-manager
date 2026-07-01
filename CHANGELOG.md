@@ -4,13 +4,26 @@ All notable user-facing changes to Cursor Profile Manager.
 
 Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (when applicable). Newest dates first.
 
+## 2026-07-01
+
+### Removed
+
+- **Tray notifications** — balloon tips on instance start/stop/count change (removed with the buggy notification loop).
+
+### Fixed
+
+- **Multiple windows per profile** — when a profile already has a window open, Start opens a new window instead of focusing the existing one; repeat launches with a default project use `--new-window` then `--add` (Cursor reuses the window if the same folder is passed in one command).
+- **Instances count** — counts `--type=renderer` windows per profile (was capped at 1 because only the main Electron process was counted).
+- **Instances count (subprocess noise)** — no longer counts gpu/utility helpers from the earlier over-counting fix.
+- **Refresh after Start** — deferred refresh only resets the debounce timer instead of forcing an immediate rescan during the process spawn burst.
+
 ## 2026-06-30
 
 ### Added
 
 - **Instances column** — shows how many Cursor windows are running per profile (0, 1, 2, …).
 - **Multiple windows per profile** — Start / double-click always opens another `--new-window` for the same profile.
-- **Tray notifications** — balloon tips when instances start, stop, or the count changes.
+- **Tray notifications** — balloon tips when instances start, stop, or the count changes. *(Removed 2026-07-01.)*
 - **Single-instance manager** — only one Profile Manager window; a second launch brings the existing window to the front.
 - **In-memory grid model** — status data is kept separate from the DataGridView; the UI updates only when the model changes.
 - **`CHANGELOG.md`** — user-facing change history (this file).

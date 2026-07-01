@@ -41,6 +41,7 @@ Rules:
 - **No** `--max-memory`, `--reuse-window`, or Cursor `--profile` flag.
 - Create profile directory if missing before launch.
 - **Multiple instances** of the same profile are allowed — each Start adds another `--new-window`.
+- When the profile is **already running** and has a default project folder, launch empty `--new-window` then `--add <project>` (same-folder reuse otherwise).
 - Detect `Cursor.exe` at `%LOCALAPPDATA%\Programs\cursor\` and `Programs\Cursor\`, then `cursor` on PATH.
 
 ## App architecture (main script)
@@ -62,11 +63,11 @@ Key modules inside the script:
 |------|-----------|-------|
 | Single instance | `Initialize-SingleInstance`, `Show-ExistingAppWindow` | Named mutex + Win32 foreground |
 | Storage | `Load-Profiles`, `Save-Profiles`, `New-ProfileObject` | UTF-8 JSON |
-| Process scan | `Get-UserDataDirInstanceCounts`, `Get-ProfileInstanceCount` | CIM `Win32_Process` |
+| Process scan | `Get-UserDataDirInstanceCounts`, `Get-ProfileInstanceCount` | CIM `Win32_Process`; count `--type=renderer` per user-data-dir (one window each) |
 | Launch | `Find-CursorExecutable`, `Start-CursorProfileInstance` | |
 | Grid model | `Build-GridModel`, `Test-GridModelEqual`, `Update-ProfileGrid` | View separated from UI |
 | Grid view sync | `Apply-GridModelToView`, `Sync-GridRowToView` | In-place cell updates |
-| Notifications | `Invoke-GridModelNotifications`, `Show-ProfileNotification` | Tray balloon |
+| Notifications | *(removed)* | Was tray balloon on instance count change |
 | Process events | `Start-CursorProcessWatchers`, `Request-DeferredGridRefresh` | WMI + debounce timer |
 
 **Do not** call `$grid.Rows.Clear()` on periodic refresh — update the model, diff, then patch rows.
@@ -117,7 +118,7 @@ Do not skip the changelog for “small” GUI tweaks — if the user would notic
 2. Start profile → new Cursor window with correct `--user-data-dir`.
 3. Start same profile again → Instances column shows `2`; both windows share profile data.
 4. Start a second profile on same project → both profiles independent.
-5. Close one Cursor window → Instances decrements; notification optional.
+5. Close one Cursor window → Instances decrements.
 6. Launch manager twice → second launch focuses existing window (no duplicate manager).
 7. Status / Instances update within ~2 s of process start or exit.
 
@@ -178,7 +179,7 @@ $UiStartLabel = "Start $([char]0x25B6)"        # Start ▶
 
 - Query processes with **`Get-CimInstance Win32_Process`** (not deprecated WMI cmdlets).
 - Parse `--user-data-dir` from `CommandLine` with a tested regex; normalize paths (trim trailing `\`, lowercase for comparison).
-- **Count instances** per dir (hashtable of counts), not just presence in a set.
+- **Count windows** per dir: `--type=renderer` processes whose user-data-dir matches an active main process for that dir; if main exists but no renderer yet (startup), count as 1.
 - WMI event watchers: subscribe with **`.add_EventArrived($handler)`** on the UI thread — **not** `Register-ObjectEvent` (separate runspace; breaks `$form` access).
 - Debounce rapid process events with a **one-shot `Timer`** (~500 ms) before rescanning.
 

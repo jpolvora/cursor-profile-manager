@@ -44,7 +44,6 @@ Re-run after moving this folder to repair the shortcut.
 | **Status column** | `● Running` / `○ Idle` from live `Cursor.exe` process inspection |
 | **Instances column** | Count of running windows per profile (0, 1, 2, …) |
 | **Live updates** | WMI process create/exit events + 2 s fallback poll; grid updates only when data changes |
-| **Tray notifications** | Balloon when instances start, stop, or the count changes |
 | **Single instance** | Second launch activates the existing manager window |
 | **Persistence** | Profiles saved to `profiles.json` in the profiles directory |
 | **Safe delete** | Optional data-folder removal; blocked while any instance is running |
@@ -72,7 +71,9 @@ This tool uses **separate `--user-data-dir` folders**, not Cursor 3.x's built-in
 
 ### Runtime detection
 
-Running profiles are detected by parsing `Cursor.exe` command lines for `--user-data-dir`. The **Instances** count is the number of matching processes (one per window in typical use).
+Running profiles are detected by parsing `Cursor.exe` command lines for `--user-data-dir`. The **Instances** count is the number of **`--type=renderer`** processes for that profile (one per window). Electron uses a single main process per profile; counting only that process always showed `1` while running. Helper processes (`gpu`, `utility`, etc.) are excluded.
+
+When a profile is **already running** and has a default project folder, **Start** opens an empty `--new-window` and then `--add`s the folder. Cursor reuses the existing window if you pass the same folder in one launch, even with `--new-window`.
 
 Status refresh uses:
 
