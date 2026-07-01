@@ -6,6 +6,13 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ## 2026-07-01
 
+### Fixed
+
+- **C# interop** — changed `List<IntPtr>` to `IntPtr[]` in window focus helpers to fix binding errors on older PowerShell 5.1 environments.
+- **Add/Edit dialog** — fixed an issue where validation would run after the dialog closed, causing data loss if the profile name was left empty.
+- **Launch arguments** — updated the `--user-data-dir` argument to strictly use the format `--user-data-dir="<path>"` to prevent path parsing issues.
+- **Storage** — wrapped profile and settings saves in `try/catch` blocks to prevent the app from crashing if the configuration files are locked or unwritable.
+
 ### Changed
 
 - **Start** — moved from the toolbar to the first button in each row's **Actions** column (toolbar **Start** removed).

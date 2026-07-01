@@ -16,10 +16,10 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 1.3.2
+# App-Version: 1.3.3
 $AppWindowTitle = 'Cursor Profile Manager'
 $SingleInstanceMutexName = 'Local\CursorProfileManager_GUI_v1'
-$script:AppVersionId = '1.3.2'
+$script:AppVersionId = '1.3.3'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
 $script:InstallRoot = $PSScriptRoot
@@ -98,7 +98,7 @@ public static class Win32AppFocus {
             SetForegroundWindow(hWnd);
         }
     }
-    public static List<IntPtr> GetVisibleTopLevelWindowsForProcesses(int[] processIds) {
+    public static IntPtr[] GetVisibleTopLevelWindowsForProcesses(int[] processIds) {
         var pidSet = new HashSet<uint>();
         if (processIds != null) {
             foreach (int id in processIds) {
@@ -115,7 +115,7 @@ public static class Win32AppFocus {
             handles.Add(hWnd);
             return true;
         }, IntPtr.Zero);
-        return handles;
+        return handles.ToArray();
     }
 }
 '@
@@ -501,7 +501,16 @@ function Load-Profiles {
 function Save-Profiles {
     param([Parameter(Mandatory)][array]$Profiles)
     Ensure-ProfilesRoot
-    $Profiles | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigPath -Encoding UTF8
+    try {
+        $Profiles | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigPath -Encoding UTF8
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Failed to save profiles to profiles.json.`n`n$($_.Exception.Message)",
+            'Save Error',
+            'OK',
+            'Error') | Out-Null
+    }
 }
 
 function New-ProfileObject {
@@ -546,7 +555,16 @@ function Save-AppSettings {
     $settings = [PSCustomObject]@{
         Theme = $script:UiThemePreference
     }
-    $settings | ConvertTo-Json -Depth 3 | Set-Content -Path $SettingsPath -Encoding UTF8
+    try {
+        $settings | ConvertTo-Json -Depth 3 | Set-Content -Path $SettingsPath -Encoding UTF8
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Failed to save settings.json.`n`n$($_.Exception.Message)",
+            'Save Error',
+            'OK',
+            'Error') | Out-Null
+    }
 }
 
 function Sync-UiThemeComboSelection {
@@ -753,13 +771,13 @@ function ConvertTo-AppVersionNumbers {
 
     if ([string]::IsNullOrWhiteSpace($VersionId)) { return $null }
     $parts = $VersionId.Trim().Split('.')
-    $numbers = New-Object 'System.Collections.Generic.List[int]'
+    $numbers = @()
     foreach ($part in $parts) {
         $segment = $part.Trim()
         if ($segment -notmatch '^\d+$') {
             return $null
         }
-        [void]$numbers.Add([int]$segment)
+        $numbers += [int]$segment
     }
     if ($numbers.Count -eq 0) { return $null }
     return $numbers.ToArray()
@@ -1711,13 +1729,13 @@ function Start-CursorProfileInstance {
     # Cursor/VS Code reuses the existing window when the same folder is already open,
     # even with --new-window. Open an empty window, then --add the project folder.
     if ($runningCount -gt 0 -and $projectExists) {
-        Start-Process -FilePath $cursor -ArgumentList @('--user-data-dir', $Profile.UserDataDir, '--new-window')
+        Start-Process -FilePath $cursor -ArgumentList @("--user-data-dir=$($Profile.UserDataDir)", '--new-window')
         Start-Sleep -Milliseconds 800
-        Start-Process -FilePath $cursor -ArgumentList @('--user-data-dir', $Profile.UserDataDir, '--add', $Profile.ProjectPath)
+        Start-Process -FilePath $cursor -ArgumentList @("--user-data-dir=$($Profile.UserDataDir)", '--add', $Profile.ProjectPath)
         return
     }
 
-    $argList = @('--user-data-dir', $Profile.UserDataDir, '--new-window')
+    $argList = @("--user-data-dir=$($Profile.UserDataDir)", '--new-window')
     if ($projectExists) {
         $argList += $Profile.ProjectPath
     }
@@ -1872,7 +1890,15 @@ function Show-ProfileDialog {
     $btnOk.Text = if ($isEdit) { 'Save' } else { 'Add' }
     $btnOk.Location = New-Object System.Drawing.Point(298, $y)
     $btnOk.Size = New-Object System.Drawing.Size(82, 30)
-    $btnOk.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $btnOk.DialogResult = [System.Windows.Forms.DialogResult]::None
+    $btnOk.Add_Click({
+        if ([string]::IsNullOrWhiteSpace($txtName.Text)) {
+            [System.Windows.Forms.MessageBox]::Show('Profile name is required.', 'Validation', 'OK', 'Warning') | Out-Null
+            return
+        }
+        $dlg.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $dlg.Close()
+    })
     Set-ButtonFlatStyle -Button $btnOk -Primary
     $dlg.Controls.Add($btnOk)
     $dlg.AcceptButton = $btnOk
@@ -1904,11 +1930,6 @@ function Show-ProfileDialog {
     $result = $dlg.ShowDialog($form)
 
     if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
-        return $null
-    }
-
-    if ([string]::IsNullOrWhiteSpace($txtName.Text)) {
-        [System.Windows.Forms.MessageBox]::Show('Profile name is required.', 'Validation', 'OK', 'Warning') | Out-Null
         return $null
     }
 
