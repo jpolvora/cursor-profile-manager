@@ -12,14 +12,16 @@
 .EXAMPLE
     .\cursor-profile-manager.ps1
 #>
-param()
+param(
+    [switch]$FunctionsOnly
+)
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 1.3.3
+# App-Version: 1.3.5
 $AppWindowTitle = 'Cursor Profile Manager'
 $SingleInstanceMutexName = 'Local\CursorProfileManager_GUI_v1'
-$script:AppVersionId = '1.3.3'
+$script:AppVersionId = '1.3.5'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
 $script:InstallRoot = $PSScriptRoot
@@ -152,7 +154,9 @@ function Initialize-SingleInstance {
     exit 0
 }
 
-[void](Initialize-SingleInstance -MutexName $SingleInstanceMutexName)
+if (-not $FunctionsOnly) {
+    [void](Initialize-SingleInstance -MutexName $SingleInstanceMutexName)
+}
 Initialize-Win32AppFocus
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -490,7 +494,7 @@ function Load-Profiles {
         if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
         $data = $raw | ConvertFrom-Json
         if ($null -eq $data) { return @() }
-        return @($data)
+        return , @($data)
     }
     catch {
         Write-Warning "Failed to read profiles.json: $($_.Exception.Message)"
@@ -780,7 +784,7 @@ function ConvertTo-AppVersionNumbers {
         $numbers += [int]$segment
     }
     if ($numbers.Count -eq 0) { return $null }
-    return $numbers.ToArray()
+    return , $numbers
 }
 
 function Compare-AppVersionId {
@@ -1337,36 +1341,42 @@ function Test-CursorInstallReady {
     return $info.IsInstalled
 }
 
-function Get-UserDataDirInstanceCounts {
+function Get-NormalizedUserDataDirFromCommandLine {
+    param([string]$CommandLine)
+
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $null }
+    if ($CommandLine -notmatch '--user-data-dir[= ]"?([^"]+?)"?(\s--|\s|$)') { return $null }
+    return $matches[1].TrimEnd('\', '/').ToLowerInvariant()
+}
+
+function Get-UserDataDirInstanceCountsFromProcessRecords {
+    param([array]$ProcessRecords)
+
     # Count Cursor windows per user-data-dir via --type=renderer processes. Electron keeps
     # one main process per profile; each additional window is a renderer child.
     $counts = @{}
-    $procs = @(Get-CimInstance Win32_Process -Filter "name='Cursor.exe'" -ErrorAction SilentlyContinue)
-    if ($procs.Count -eq 0) { return $counts }
+    if ($null -eq $ProcessRecords -or $ProcessRecords.Count -eq 0) { return $counts }
 
     $cursorPids = @{}
-    foreach ($p in $procs) {
+    foreach ($p in $ProcessRecords) {
         $cursorPids[$p.ProcessId] = $true
     }
 
     $mainByDir = @{}
-    foreach ($p in $procs) {
+    foreach ($p in $ProcessRecords) {
         $cmd = $p.CommandLine
-        if (-not $cmd -or $cmd -notmatch '--user-data-dir[= ]"?([^"]+?)"?(\s--|\s|$)') { continue }
+        $dir = Get-NormalizedUserDataDirFromCommandLine -CommandLine $cmd
+        if (-not $dir) { continue }
         if ($cmd -match '--type=') { continue }
         if ($cursorPids.ContainsKey($p.ParentProcessId)) { continue }
-
-        $dir = $matches[1].TrimEnd('\', '/').ToLowerInvariant()
         $mainByDir[$dir] = $true
     }
 
-    foreach ($p in $procs) {
+    foreach ($p in $ProcessRecords) {
         $cmd = $p.CommandLine
         if (-not $cmd -or $cmd -notmatch '--type=renderer') { continue }
-        if ($cmd -notmatch '--user-data-dir[= ]"?([^"]+?)"?(\s--|\s|$)') { continue }
-
-        $dir = $matches[1].TrimEnd('\', '/').ToLowerInvariant()
-        if (-not $mainByDir.ContainsKey($dir)) { continue }
+        $dir = Get-NormalizedUserDataDirFromCommandLine -CommandLine $cmd
+        if (-not $dir -or -not $mainByDir.ContainsKey($dir)) { continue }
 
         if ($counts.ContainsKey($dir)) {
             $counts[$dir]++
@@ -1383,6 +1393,20 @@ function Get-UserDataDirInstanceCounts {
     }
 
     return $counts
+}
+
+function Get-UserDataDirInstanceCounts {
+    $procs = @(Get-CimInstance Win32_Process -Filter "name='Cursor.exe'" -ErrorAction SilentlyContinue)
+    if ($procs.Count -eq 0) { return @{} }
+
+    $records = foreach ($p in $procs) {
+        [PSCustomObject]@{
+            ProcessId       = [int]$p.ProcessId
+            ParentProcessId = [int]$p.ParentProcessId
+            CommandLine     = [string]$p.CommandLine
+        }
+    }
+    return Get-UserDataDirInstanceCountsFromProcessRecords -ProcessRecords $records
 }
 
 function Get-ProfileInstanceCount {
@@ -1403,9 +1427,7 @@ function Get-CursorProcessIdsForUserDataDir {
     $procs = @(Get-CimInstance Win32_Process -Filter "name='Cursor.exe'" -ErrorAction SilentlyContinue)
 
     foreach ($p in $procs) {
-        $cmd = $p.CommandLine
-        if (-not $cmd -or $cmd -notmatch '--user-data-dir[= ]"?([^"]+?)"?(\s--|\s|$)') { continue }
-        $dir = $matches[1].TrimEnd('\', '/').ToLowerInvariant()
+        $dir = Get-NormalizedUserDataDirFromCommandLine -CommandLine $p.CommandLine
         if ($dir -ne $norm) { continue }
         $pids += [int]$p.ProcessId
     }
@@ -1948,212 +1970,8 @@ function Show-ProfileDialog {
 }
 
 # ---------------------------------------------------------------------------
-# Main window
+# Grid model (view sync)
 # ---------------------------------------------------------------------------
-
-Ensure-ProfilesRoot
-Load-AppSettings
-Set-UiThemePalette -ThemeName (Get-EffectiveUiThemeName)
-
-$script:Profiles = Load-Profiles
-
-$form = New-Object System.Windows.Forms.Form
-$form.Text = $AppWindowTitle
-$form.Size = New-Object System.Drawing.Size(980, 520)
-$form.StartPosition = 'CenterScreen'
-$form.MinimumSize = New-Object System.Drawing.Size(900, 420)
-$form.Font = $script:UiFont
-$form.BackColor = $script:UiBackColor
-[void](Set-FormIcon -TargetForm $form)
-
-$statusPanel = New-Object System.Windows.Forms.Panel
-$statusPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
-$statusPanel.Height = 30
-$statusPanel.BackColor = $script:UiPanelColor
-$statusPanel.Padding = New-Object System.Windows.Forms.Padding(14, 0, 14, 0)
-
-$lblStatus = New-Object System.Windows.Forms.Label
-$lblStatus.Text = "Profiles dir: $ProfilesRoot"
-$lblStatus.Dock = [System.Windows.Forms.DockStyle]::Fill
-$lblStatus.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
-$lblStatus.ForeColor = $script:UiTextMuted
-
-$script:CheckUpdateLink = New-Object System.Windows.Forms.LinkLabel
-$script:CheckUpdateLink.AutoSize = $true
-$script:CheckUpdateLink.Dock = [System.Windows.Forms.DockStyle]::Right
-$script:CheckUpdateLink.Padding = New-Object System.Windows.Forms.Padding(0, 7, 0, 0)
-$script:CheckUpdateLink.ForeColor = $script:UiTextMuted
-$script:CheckUpdateLink.LinkColor = $script:UiAccent
-$script:CheckUpdateLink.ActiveLinkColor = $script:UiAccentHover
-$script:CheckUpdateLink.VisitedLinkColor = $script:UiAccent
-$script:CheckUpdateLink.BackColor = $script:UiPanelColor
-$script:CheckUpdateLink.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-Set-CheckUpdateLinkDisplay
-$script:CheckUpdateLink.Add_LinkClicked({
-    $script:CheckUpdateLink.Enabled = $false
-    $form.UseWaitCursor = $true
-    try {
-        Invoke-CheckForAppUpdate
-    }
-    catch {
-        [System.Windows.Forms.MessageBox]::Show(
-            "Could not check for updates:`n$($_.Exception.Message)",
-            'Update check failed',
-            'OK',
-            'Error') | Out-Null
-    }
-    finally {
-        $form.UseWaitCursor = $false
-        $script:CheckUpdateLink.Enabled = $true
-    }
-})
-
-$script:CursorInstallLink = New-Object System.Windows.Forms.LinkLabel
-$script:CursorInstallLink.AutoSize = $true
-$script:CursorInstallLink.Dock = [System.Windows.Forms.DockStyle]::Right
-$script:CursorInstallLink.Padding = New-Object System.Windows.Forms.Padding(0, 7, 12, 0)
-$script:CursorInstallLink.BackColor = $script:UiPanelColor
-$script:CursorInstallLink.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-$script:CursorInstallLink.Add_LinkClicked({
-    $info = Get-CursorInstallInfo
-    if ($info.IsInstalled -and $info.HasCli) { return }
-    Show-CursorInstallDialog
-    Update-CursorInstallUi
-})
-[void](Get-CursorInstallInfo -ForceRefresh)
-Set-CursorInstallLinkDisplay
-
-$statusPanel.Controls.Add($script:CheckUpdateLink)
-$statusPanel.Controls.Add($script:CursorInstallLink)
-$statusPanel.Controls.Add($lblStatus)
-
-$toolbarPanel = New-Object System.Windows.Forms.Panel
-$toolbarPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
-$toolbarPanel.Height = 94
-$toolbarPanel.BackColor = $script:UiPanelColor
-$toolbarPanel.Padding = New-Object System.Windows.Forms.Padding(14, 8, 14, 8)
-
-$script:ToolbarTable = New-Object System.Windows.Forms.TableLayoutPanel
-$script:ToolbarTable.Dock = [System.Windows.Forms.DockStyle]::Fill
-$script:ToolbarTable.RowCount = 2
-$script:ToolbarTable.ColumnCount = 1
-$script:ToolbarTable.Margin = New-Object System.Windows.Forms.Padding 0
-$script:ToolbarTable.Padding = New-Object System.Windows.Forms.Padding 0
-[void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 38)))
-[void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 38)))
-[void]$script:ToolbarTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-
-$script:ProfileTable = New-Object System.Windows.Forms.TableLayoutPanel
-$script:ProfileTable.Dock = [System.Windows.Forms.DockStyle]::Fill
-$script:ProfileTable.RowCount = 1
-$script:ProfileTable.ColumnCount = 2
-$script:ProfileTable.Margin = New-Object System.Windows.Forms.Padding 0
-$script:ProfileTable.Padding = New-Object System.Windows.Forms.Padding 0
-[void]$script:ProfileTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 58)))
-[void]$script:ProfileTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-
-$script:LblProfilesSection = New-ToolbarSectionLabel -Text 'Profiles'
-$script:ProfileFlow = New-Object System.Windows.Forms.FlowLayoutPanel
-$script:ProfileFlow.Dock = [System.Windows.Forms.DockStyle]::Fill
-$script:ProfileFlow.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
-$script:ProfileFlow.WrapContents = $false
-$script:ProfileFlow.Margin = New-Object System.Windows.Forms.Padding 0
-$script:ProfileFlow.Padding = New-Object System.Windows.Forms.Padding 0, 4, 0, 0
-$script:ProfileFlow.AutoSize = $false
-
-$script:ProfileTable.Controls.Add($script:LblProfilesSection, 0, 0)
-$script:ProfileTable.Controls.Add($script:ProfileFlow, 1, 0)
-$script:ToolbarTable.Controls.Add($script:ProfileTable, 0, 0)
-
-$script:LaunchTable = New-Object System.Windows.Forms.TableLayoutPanel
-$script:LaunchTable.Dock = [System.Windows.Forms.DockStyle]::Fill
-$script:LaunchTable.RowCount = 1
-$script:LaunchTable.ColumnCount = 2
-$script:LaunchTable.Margin = New-Object System.Windows.Forms.Padding 0
-$script:LaunchTable.Padding = New-Object System.Windows.Forms.Padding 0
-[void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 188)))
-[void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-
-$script:ThemeFlow = New-Object System.Windows.Forms.FlowLayoutPanel
-$script:ThemeFlow.Dock = [System.Windows.Forms.DockStyle]::Fill
-$script:ThemeFlow.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
-$script:ThemeFlow.WrapContents = $false
-$script:ThemeFlow.Margin = New-Object System.Windows.Forms.Padding 0
-$script:ThemeFlow.Padding = New-Object System.Windows.Forms.Padding 0, 4, 0, 0
-
-$script:LblLaunchHint = New-Object System.Windows.Forms.Label
-$script:LblLaunchHint.Text = 'Double-click a row to start  |  Actions: Start, Focus, Close, Folder, Edit, Del'
-$script:LblLaunchHint.Dock = [System.Windows.Forms.DockStyle]::Fill
-$script:LblLaunchHint.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
-$script:LblLaunchHint.ForeColor = $script:UiTextMuted
-$script:LblLaunchHint.BackColor = $script:UiPanelColor
-$script:LblLaunchHint.Margin = New-Object System.Windows.Forms.Padding 8, 0, 8, 0
-$script:LblLaunchHint.AutoEllipsis = $true
-
-$script:LaunchTable.Controls.Add($script:ThemeFlow, 0, 0)
-$script:LaunchTable.Controls.Add($script:LblLaunchHint, 1, 0)
-$script:ToolbarTable.Controls.Add($script:LaunchTable, 0, 1)
-$toolbarPanel.Controls.Add($script:ToolbarTable)
-
-$toolbarSep = New-Object System.Windows.Forms.Panel
-$toolbarSep.Dock = [System.Windows.Forms.DockStyle]::Bottom
-$toolbarSep.Height = 1
-$toolbarSep.BackColor = $script:UiBorderColor
-
-$contentPanel = New-Object System.Windows.Forms.Panel
-$contentPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-$contentPanel.BackColor = $script:UiBackColor
-$contentPanel.Padding = New-Object System.Windows.Forms.Padding(14, 14, 14, 14)
-
-$gridHost = New-Object System.Windows.Forms.Panel
-$gridHost.Dock = [System.Windows.Forms.DockStyle]::Fill
-$gridHost.BackColor = $script:UiPanelColor
-$gridHost.Padding = New-Object System.Windows.Forms.Padding(1)
-
-$grid = New-Object System.Windows.Forms.DataGridView
-$grid.Dock = [System.Windows.Forms.DockStyle]::Fill
-$grid.AllowUserToAddRows = $false
-$grid.AllowUserToDeleteRows = $false
-$grid.SelectionMode = 'FullRowSelect'
-$grid.MultiSelect = $false
-$grid.AutoSizeColumnsMode = 'Fill'
-$grid.RowHeadersVisible = $false
-$grid.EditMode = [System.Windows.Forms.DataGridViewEditMode]::EditProgrammatically
-
-[void]$grid.Columns.Add('Name', 'Name')
-[void]$grid.Columns.Add('UserDataDir', 'User Data Dir')
-[void]$grid.Columns.Add('Instances', 'Instances')
-[void]$grid.Columns.Add('Status', 'Status')
-[void]$grid.Columns.Add('Notes', 'Notes')
-Add-GridActionColumns -TargetGrid $grid
-
-$grid.Columns['Name'].ReadOnly = $true
-$grid.Columns['UserDataDir'].ReadOnly = $true
-$grid.Columns['Instances'].ReadOnly = $true
-$grid.Columns['Status'].ReadOnly = $true
-$grid.Columns['Notes'].ReadOnly = $true
-
-$grid.Columns['Name'].FillWeight = 90
-$grid.Columns['UserDataDir'].FillWeight = 180
-$grid.Columns['Instances'].FillWeight = 45
-$grid.Columns['Instances'].DefaultCellStyle.Alignment = [System.Windows.Forms.DataGridViewContentAlignment]::MiddleCenter
-$grid.Columns['Status'].FillWeight = 55
-$grid.Columns['Notes'].FillWeight = 100
-
-# Reduce paint flicker during frequent status updates.
-$grid.GetType().GetProperty('DoubleBuffered', [System.Reflection.BindingFlags]'Instance, NonPublic').SetValue($grid, $true, $null)
-Apply-DataGridTheme -TargetGrid $grid
-
-$gridHost.Controls.Add($grid)
-$contentPanel.Controls.Add($gridHost)
-$form.Controls.Add($contentPanel)
-$form.Controls.Add($toolbarSep)
-$form.Controls.Add($toolbarPanel)
-$form.Controls.Add($statusPanel)
-
-$script:GridModel = $null
-$script:DefaultGridForeColor = $script:UiTextPrimary
-$script:RunningGridForeColor = $script:UiRunningColor
 
 function New-GridRowModel {
     param(
@@ -2409,6 +2227,216 @@ function Open-ProfileUserDataDir {
 
     return $true
 }
+
+# ---------------------------------------------------------------------------
+# Main window
+# ---------------------------------------------------------------------------
+
+if ($FunctionsOnly) { return }
+
+Ensure-ProfilesRoot
+Load-AppSettings
+Set-UiThemePalette -ThemeName (Get-EffectiveUiThemeName)
+
+$script:Profiles = Load-Profiles
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = $AppWindowTitle
+$form.Size = New-Object System.Drawing.Size(980, 520)
+$form.StartPosition = 'CenterScreen'
+$form.MinimumSize = New-Object System.Drawing.Size(900, 420)
+$form.Font = $script:UiFont
+$form.BackColor = $script:UiBackColor
+[void](Set-FormIcon -TargetForm $form)
+
+$statusPanel = New-Object System.Windows.Forms.Panel
+$statusPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
+$statusPanel.Height = 30
+$statusPanel.BackColor = $script:UiPanelColor
+$statusPanel.Padding = New-Object System.Windows.Forms.Padding(14, 0, 14, 0)
+
+$lblStatus = New-Object System.Windows.Forms.Label
+$lblStatus.Text = "Profiles dir: $ProfilesRoot"
+$lblStatus.Dock = [System.Windows.Forms.DockStyle]::Fill
+$lblStatus.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+$lblStatus.ForeColor = $script:UiTextMuted
+
+$script:CheckUpdateLink = New-Object System.Windows.Forms.LinkLabel
+$script:CheckUpdateLink.AutoSize = $true
+$script:CheckUpdateLink.Dock = [System.Windows.Forms.DockStyle]::Right
+$script:CheckUpdateLink.Padding = New-Object System.Windows.Forms.Padding(0, 7, 0, 0)
+$script:CheckUpdateLink.ForeColor = $script:UiTextMuted
+$script:CheckUpdateLink.LinkColor = $script:UiAccent
+$script:CheckUpdateLink.ActiveLinkColor = $script:UiAccentHover
+$script:CheckUpdateLink.VisitedLinkColor = $script:UiAccent
+$script:CheckUpdateLink.BackColor = $script:UiPanelColor
+$script:CheckUpdateLink.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+Set-CheckUpdateLinkDisplay
+$script:CheckUpdateLink.Add_LinkClicked({
+    $script:CheckUpdateLink.Enabled = $false
+    $form.UseWaitCursor = $true
+    try {
+        Invoke-CheckForAppUpdate
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Could not check for updates:`n$($_.Exception.Message)",
+            'Update check failed',
+            'OK',
+            'Error') | Out-Null
+    }
+    finally {
+        $form.UseWaitCursor = $false
+        $script:CheckUpdateLink.Enabled = $true
+    }
+})
+
+$script:CursorInstallLink = New-Object System.Windows.Forms.LinkLabel
+$script:CursorInstallLink.AutoSize = $true
+$script:CursorInstallLink.Dock = [System.Windows.Forms.DockStyle]::Right
+$script:CursorInstallLink.Padding = New-Object System.Windows.Forms.Padding(0, 7, 12, 0)
+$script:CursorInstallLink.BackColor = $script:UiPanelColor
+$script:CursorInstallLink.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+$script:CursorInstallLink.Add_LinkClicked({
+    $info = Get-CursorInstallInfo
+    if ($info.IsInstalled -and $info.HasCli) { return }
+    Show-CursorInstallDialog
+    Update-CursorInstallUi
+})
+[void](Get-CursorInstallInfo -ForceRefresh)
+Set-CursorInstallLinkDisplay
+
+$statusPanel.Controls.Add($script:CheckUpdateLink)
+$statusPanel.Controls.Add($script:CursorInstallLink)
+$statusPanel.Controls.Add($lblStatus)
+
+$toolbarPanel = New-Object System.Windows.Forms.Panel
+$toolbarPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
+$toolbarPanel.Height = 94
+$toolbarPanel.BackColor = $script:UiPanelColor
+$toolbarPanel.Padding = New-Object System.Windows.Forms.Padding(14, 8, 14, 8)
+
+$script:ToolbarTable = New-Object System.Windows.Forms.TableLayoutPanel
+$script:ToolbarTable.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:ToolbarTable.RowCount = 2
+$script:ToolbarTable.ColumnCount = 1
+$script:ToolbarTable.Margin = New-Object System.Windows.Forms.Padding 0
+$script:ToolbarTable.Padding = New-Object System.Windows.Forms.Padding 0
+[void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 38)))
+[void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 38)))
+[void]$script:ToolbarTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+
+$script:ProfileTable = New-Object System.Windows.Forms.TableLayoutPanel
+$script:ProfileTable.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:ProfileTable.RowCount = 1
+$script:ProfileTable.ColumnCount = 2
+$script:ProfileTable.Margin = New-Object System.Windows.Forms.Padding 0
+$script:ProfileTable.Padding = New-Object System.Windows.Forms.Padding 0
+[void]$script:ProfileTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 58)))
+[void]$script:ProfileTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+
+$script:LblProfilesSection = New-ToolbarSectionLabel -Text 'Profiles'
+$script:ProfileFlow = New-Object System.Windows.Forms.FlowLayoutPanel
+$script:ProfileFlow.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:ProfileFlow.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
+$script:ProfileFlow.WrapContents = $false
+$script:ProfileFlow.Margin = New-Object System.Windows.Forms.Padding 0
+$script:ProfileFlow.Padding = New-Object System.Windows.Forms.Padding 0, 4, 0, 0
+$script:ProfileFlow.AutoSize = $false
+
+$script:ProfileTable.Controls.Add($script:LblProfilesSection, 0, 0)
+$script:ProfileTable.Controls.Add($script:ProfileFlow, 1, 0)
+$script:ToolbarTable.Controls.Add($script:ProfileTable, 0, 0)
+
+$script:LaunchTable = New-Object System.Windows.Forms.TableLayoutPanel
+$script:LaunchTable.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:LaunchTable.RowCount = 1
+$script:LaunchTable.ColumnCount = 2
+$script:LaunchTable.Margin = New-Object System.Windows.Forms.Padding 0
+$script:LaunchTable.Padding = New-Object System.Windows.Forms.Padding 0
+[void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 188)))
+[void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+
+$script:ThemeFlow = New-Object System.Windows.Forms.FlowLayoutPanel
+$script:ThemeFlow.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:ThemeFlow.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
+$script:ThemeFlow.WrapContents = $false
+$script:ThemeFlow.Margin = New-Object System.Windows.Forms.Padding 0
+$script:ThemeFlow.Padding = New-Object System.Windows.Forms.Padding 0, 4, 0, 0
+
+$script:LblLaunchHint = New-Object System.Windows.Forms.Label
+$script:LblLaunchHint.Text = 'Double-click a row to start  |  Actions: Start, Focus, Close, Folder, Edit, Del'
+$script:LblLaunchHint.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:LblLaunchHint.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+$script:LblLaunchHint.ForeColor = $script:UiTextMuted
+$script:LblLaunchHint.BackColor = $script:UiPanelColor
+$script:LblLaunchHint.Margin = New-Object System.Windows.Forms.Padding 8, 0, 8, 0
+$script:LblLaunchHint.AutoEllipsis = $true
+
+$script:LaunchTable.Controls.Add($script:ThemeFlow, 0, 0)
+$script:LaunchTable.Controls.Add($script:LblLaunchHint, 1, 0)
+$script:ToolbarTable.Controls.Add($script:LaunchTable, 0, 1)
+$toolbarPanel.Controls.Add($script:ToolbarTable)
+
+$toolbarSep = New-Object System.Windows.Forms.Panel
+$toolbarSep.Dock = [System.Windows.Forms.DockStyle]::Bottom
+$toolbarSep.Height = 1
+$toolbarSep.BackColor = $script:UiBorderColor
+
+$contentPanel = New-Object System.Windows.Forms.Panel
+$contentPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
+$contentPanel.BackColor = $script:UiBackColor
+$contentPanel.Padding = New-Object System.Windows.Forms.Padding(14, 14, 14, 14)
+
+$gridHost = New-Object System.Windows.Forms.Panel
+$gridHost.Dock = [System.Windows.Forms.DockStyle]::Fill
+$gridHost.BackColor = $script:UiPanelColor
+$gridHost.Padding = New-Object System.Windows.Forms.Padding(1)
+
+$grid = New-Object System.Windows.Forms.DataGridView
+$grid.Dock = [System.Windows.Forms.DockStyle]::Fill
+$grid.AllowUserToAddRows = $false
+$grid.AllowUserToDeleteRows = $false
+$grid.SelectionMode = 'FullRowSelect'
+$grid.MultiSelect = $false
+$grid.AutoSizeColumnsMode = 'Fill'
+$grid.RowHeadersVisible = $false
+$grid.EditMode = [System.Windows.Forms.DataGridViewEditMode]::EditProgrammatically
+
+[void]$grid.Columns.Add('Name', 'Name')
+[void]$grid.Columns.Add('UserDataDir', 'User Data Dir')
+[void]$grid.Columns.Add('Instances', 'Instances')
+[void]$grid.Columns.Add('Status', 'Status')
+[void]$grid.Columns.Add('Notes', 'Notes')
+Add-GridActionColumns -TargetGrid $grid
+
+$grid.Columns['Name'].ReadOnly = $true
+$grid.Columns['UserDataDir'].ReadOnly = $true
+$grid.Columns['Instances'].ReadOnly = $true
+$grid.Columns['Status'].ReadOnly = $true
+$grid.Columns['Notes'].ReadOnly = $true
+
+$grid.Columns['Name'].FillWeight = 90
+$grid.Columns['UserDataDir'].FillWeight = 180
+$grid.Columns['Instances'].FillWeight = 45
+$grid.Columns['Instances'].DefaultCellStyle.Alignment = [System.Windows.Forms.DataGridViewContentAlignment]::MiddleCenter
+$grid.Columns['Status'].FillWeight = 55
+$grid.Columns['Notes'].FillWeight = 100
+
+# Reduce paint flicker during frequent status updates.
+$grid.GetType().GetProperty('DoubleBuffered', [System.Reflection.BindingFlags]'Instance, NonPublic').SetValue($grid, $true, $null)
+Apply-DataGridTheme -TargetGrid $grid
+
+$gridHost.Controls.Add($grid)
+$contentPanel.Controls.Add($gridHost)
+$form.Controls.Add($contentPanel)
+$form.Controls.Add($toolbarSep)
+$form.Controls.Add($toolbarPanel)
+$form.Controls.Add($statusPanel)
+
+$script:GridModel = $null
+$script:DefaultGridForeColor = $script:UiTextPrimary
+$script:RunningGridForeColor = $script:UiRunningColor
 
 $btnAdd = New-ToolbarButton -Text 'Add'
 $btnRefresh = New-ToolbarButton -Text 'Refresh'

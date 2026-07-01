@@ -20,6 +20,8 @@ Hard-won failures from past sessions. **Read this section before writing or chan
 | `[Parameter(Mandatory)][string]$HeaderText` with `-HeaderText ''` | App **fails to start** — `Cannot bind argument to parameter 'HeaderText' because it is an empty string` | Use `[AllowEmptyString()][string]$HeaderText = ''` when empty is valid |
 | `foreach ($pid in $pids)` | Subtle bugs — `$pid` shadows the automatic **`$PID`** variable | Use `$procId` or another name |
 | Generic `List[IntPtr]` in PS 5.1 helpers | May fail depending on environment | Prefer plain **`@()`** arrays and `[int[]]` casts |
+| `$arr.ToArray()` on a plain `@()`-built array | `Method invocation failed because [System.Int32] does not contain a method named 'ToArray'` — PowerShell has no `.ToArray()` on `Object[]`; it silently dispatches unresolved member calls to each **element** instead, so the error names the element type, not the array | Regular PS arrays are already arrays — drop `.ToArray()`; use `, $arr` (unary comma) on `return` to stop a single-element array being unwrapped to a scalar |
+| `return @($singleItem)` from a function | Callers see a **scalar**, not a one-element array — `.Count` is wrong in tests and callers | Use `return , @($data)` so PowerShell does not unwrap a single-element array on output |
 
 ### WinForms layout
 
@@ -48,6 +50,7 @@ Hard-won failures from past sessions. **Read this section before writing or chan
 ### Verification
 
 - After GUI or startup-path changes, **run `cursor-profile-manager.ps1`** (or parse + launch smoke) — layout bugs often do not show up in static review alone.
+- After logic changes, **run `.\run-tests.ps1`** — Pester covers version compare, storage, grid model, theme, process parsing, and update helpers.
 - With `$ErrorActionPreference = 'Stop'`, a single parameter-binding error **exits before `ShowDialog`** — user sees “app not starting”.
 
 When a new bug is fixed, **append a row or bullet here** (and add a **Fixed** changelog entry) so the next agent inherits it.
@@ -56,9 +59,11 @@ When a new bug is fixed, **append a row or bullet here** (and add a **Fixed** ch
 
 | File | Role |
 |------|------|
-| `cursor-profile-manager.ps1` | Main app — WinForms GUI; CRUD profiles; launch Cursor; process monitoring; `profiles.json` persistence. |
+| `cursor-profile-manager.ps1` | Main app — WinForms GUI; CRUD profiles; launch Cursor; process monitoring; `profiles.json` persistence. Accepts `-FunctionsOnly` to load functions without starting the GUI (used by unit tests). |
 | `cursor-profile-manager.bat` | Double-click wrapper (hidden PowerShell). |
 | `install-desktop-shortcut.ps1` | Desktop `.lnk` to the GUI. |
+| `run-tests.ps1` | Runs the Pester unit test suite in `tests/`. |
+| `tests/` | Pester tests for version compare, storage, grid model, theme, process parsing, and update helpers. |
 | `README.md` | User docs — keep in sync with behavior. |
 | `CHANGELOG.md` | User-facing history of features added, changed, or removed. |
 | `AGENTS.md` | This file — architecture, contracts, PowerShell conventions. |
@@ -125,7 +130,7 @@ Key modules inside the script:
 | Storage | `Load-Profiles`, `Save-Profiles`, `New-ProfileObject`, `Load-AppSettings`, `Save-AppSettings` | UTF-8 JSON |
 | UI theme | `Get-UiThemePalettes`, `Test-WindowsAppsUseLightTheme`, `Set-UiThemePalette`, `Set-UiThemePreference`, `Apply-UiThemeToMainWindow` | Light/dark palettes; `default` follows Windows `AppsUseLightTheme` |
 | In-app update | `Invoke-CheckForAppUpdate`, `Get-AppVersionIdFromScriptContent`, `Compare-AppVersionId`, `Start-DeferredAppUpdate` | Raw GitHub `master` files; version compare via `# App-Version` / `$script:AppVersionId`; deferred copy after exit |
-| Process scan | `Get-UserDataDirInstanceCounts`, `Get-ProfileInstanceCount` | CIM `Win32_Process`; count `--type=renderer` per user-data-dir (one window each) |
+| Process scan | `Get-NormalizedUserDataDirFromCommandLine`, `Get-UserDataDirInstanceCountsFromProcessRecords`, `Get-UserDataDirInstanceCounts`, `Get-ProfileInstanceCount` | CIM `Win32_Process`; count `--type=renderer` per user-data-dir (one window each); parsing helpers are unit-tested with mock process records |
 | Launch | `Find-CursorExecutable`, `Find-CursorCliExecutable`, `Get-CursorInstallInfo`, `Test-CursorInstallReady`, `Show-CursorInstallDialog`, `Start-CursorProfileInstance` | |
 | Focus | `Get-CursorProfileWindowHandles`, `Invoke-FocusCursorProfile` | EnumWindows by profile PIDs; cycles when multiple windows |
 | Close | `Invoke-CloseAllCursorProfileInstances` | WM_CLOSE on profile windows, then force-stop remaining PIDs |
@@ -145,6 +150,7 @@ Key modules inside the script:
 3. **Bump the app version** in `cursor-profile-manager.ps1` (see [App version ID](#app-version-id)) on every improvement session or commit that changes shipped scripts.
 4. Do not re-add CLI/bash launchers unless explicitly requested.
 5. Do not commit `profiles.json` or profile data from `~/.cursor-profiles/`.
+6. **Add or update unit tests** — see [Unit tests (required)](#unit-tests-required).
 
 ## Documentation and changelog (required)
 
@@ -178,6 +184,34 @@ Example:
 ```
 
 Do not skip the changelog for “small” GUI tweaks — if the user would notice, it gets an entry.
+
+## Unit tests (required)
+
+The repo uses **Pester 3.x+** (Windows PowerShell 5.1). Run the full suite with:
+
+```powershell
+.\run-tests.ps1
+```
+
+### Layout
+
+| Path | Role |
+|------|------|
+| `run-tests.ps1` | Test runner; restores `CURSOR_PROFILES_DIR` after the run |
+| `tests/Bootstrap.ps1` | Dot-sources `cursor-profile-manager.ps1 -FunctionsOnly` into each test file’s scope |
+| `tests/TestHelpers.ps1` | Shared helpers (`New-TestProfile`, temp profiles dir reset) |
+| `tests/*.Tests.ps1` | Describe/It blocks grouped by area (version, storage, grid, theme, process parsing, update) |
+
+Tests use a temp `CURSOR_PROFILES_DIR` — never the user’s real `~/.cursor-profiles`.
+
+### Rules for agents
+
+1. **Every new feature or behavior change** — add tests for the new/changed logic, or extend an existing `*.Tests.ps1` file.
+2. **When existing behavior changes** — update affected tests so they match the new contract; do not leave failing tests.
+3. **Do not delete tests** unless the code under test was removed (dead code). Prefer updating assertions over removal.
+4. **Prefer pure helpers** — extract testable logic (e.g. `Get-NormalizedUserDataDirFromCommandLine`, `Get-UserDataDirInstanceCountsFromProcessRecords`) instead of mocking CIM or WinForms when practical.
+5. **Run `.\run-tests.ps1`** before claiming work complete (in addition to the GUI smoke test when UI changed).
+6. Keep `-FunctionsOnly` working — all functions must be defined **before** the `if ($FunctionsOnly) { return }` guard at the bottom of the main script.
 
 ## Smoke test
 
@@ -276,7 +310,7 @@ $UiStartLabel = "Start $([char]0x25B6)"        # Start ▶
 - Do not poll faster than needed; 2 s fallback + WMI is enough for status.
 - Avoid **`Start-Sleep` in the UI thread** except short debounce / single-instance window lookup retries.
 
-### What to avoid
+### What to avoid (pitfalls) - Lesson Learned (learnings)
 
 | Avoid | Use instead |
 |-------|-------------|
@@ -286,6 +320,8 @@ $UiStartLabel = "Start $([char]0x25B6)"        # Start ▶
 | New NuGet modules / PS galleries | WinForms + built-in CIM only |
 | PS 7-only syntax | PS 5.1-compatible constructs |
 | `List[uint]` / mandatory `[string]` params passed `''` | `[int[]]` interop; `[AllowEmptyString()]` on optional empty headers |
+| `.ToArray()` on a plain PS array | Drop it — `Object[]` has no `.ToArray()`; use `, $arr` on `return` instead |
+| `return @($oneItem)` from a function | Use `return , @($data)` so callers always get an array |
 | `$grid.ReadOnly = $true` with button columns | Text columns `ReadOnly`; use `CellContentClick` for buttons |
 | Toolbar buttons positioned by hand | `TableLayoutPanel` / `FlowLayoutPanel`; fixed-width action columns |
 | **`Dock = Fill` on a primary `Button` inside `TableLayoutPanel`** | Huge blue rectangle; hint row swallowed | Fixed **width + anchor right** in a host panel (see **Start** on profile row) |
@@ -299,4 +335,5 @@ $UiStartLabel = "Start $([char]0x25B6)"        # Start ▶
 4. New user-visible strings with symbols? → `[char]` code points or ASCII labels.
 5. **Add a `CHANGELOG.md` entry** (Added / Changed / Removed / Fixed).
 6. **Bump `$script:AppVersionId` and `# App-Version:`** in `cursor-profile-manager.ps1` when shipped script behavior changes.
-7. Run smoke test (see above).
+7. **Add or update unit tests** in `tests/` and run `.\run-tests.ps1`.
+8. Run smoke test (see above).

@@ -146,7 +146,17 @@ Click **Check for updates** in the footer status bar. The manager reads the `# A
 
 On apply, it downloads `cursor-profile-manager.ps1`, `cursor-profile-manager.bat`, and `install-desktop-shortcut.ps1`, replaces them in the folder you launched from, then restarts. Existing `.bat` launchers and Desktop shortcuts keep working.
 
-Current release marker in the main script: `# App-Version: 1.3.2` / `$script:AppVersionId` (also shown in the footer as `v1.3.2`).
+Current release marker in the main script: `# App-Version: 1.3.5` / `$script:AppVersionId` (also shown in the footer as `v1.3.5`).
+
+## Unit tests
+
+Requires [Pester](https://pester.dev/) 3.x or later (often preinstalled on Windows). From the repo root:
+
+```powershell
+.\run-tests.ps1
+```
+
+Tests use a temporary profiles directory — your real `~/.cursor-profiles` data is not touched.
 
 ### Manual launch (without the GUI)
 
@@ -163,6 +173,8 @@ Current release marker in the main script: `# App-Version: 1.3.2` / `$script:App
 | `cursor-profile-manager.ps1` | Main WinForms GUI |
 | `cursor-profile-manager.bat` | Hidden PowerShell launcher |
 | `install-desktop-shortcut.ps1` | Creates/repairs a Desktop shortcut |
+| `run-tests.ps1` | Pester unit test runner |
+| `tests/` | Unit tests for core helpers and logic |
 | `CHANGELOG.md` | User-facing change history |
 | `AGENTS.md` | Guide for AI agents and PowerShell conventions in this repo |
 

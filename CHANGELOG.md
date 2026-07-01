@@ -4,6 +4,28 @@ All notable user-facing changes to Cursor Profile Manager.
 
 Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (when applicable). Newest dates first.
 
+## 2026-07-01 (3)
+
+### Added
+
+- **Unit tests** — Pester suite in `tests/` covering version compare/update status, profile/settings storage, grid model, UI theme helpers, Cursor command-line parsing, and update staging. Run with `.\run-tests.ps1` (requires Pester 3.x+).
+- **`-FunctionsOnly` switch** — dot-sources the main script without launching the GUI (used by tests).
+
+### Changed
+
+- **Process parsing** — extracted `Get-NormalizedUserDataDirFromCommandLine` and `Get-UserDataDirInstanceCountsFromProcessRecords` for testable window counting.
+- **Grid model functions** — moved above the GUI entry point so `-FunctionsOnly` loads all helpers.
+
+### Fixed
+
+- **`Load-Profiles`** — single-profile `profiles.json` files now return a one-element array (`return , @($data)`) instead of unwrapping to a scalar.
+
+## 2026-07-01 (2)
+
+### Fixed
+
+- **Check for updates** — `Compare-AppVersionId` threw `Method invocation failed because [System.Int32] does not contain a method named 'ToArray'.` on every update check. Regular PowerShell arrays (`Object[]`) have no `.ToArray()` method; when a member call isn't found on the array, PowerShell dispatches it to each element instead, which is where the `System.Int32` in the error message came from. Removed the invalid `.ToArray()` call and return the version-number array with the unary comma operator (`, $numbers`) so a single-segment version isn't unwrapped to a scalar on return.
+
 ## 2026-07-01
 
 ### Fixed
