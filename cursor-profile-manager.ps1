@@ -18,10 +18,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 1.3.5
+# App-Version: 1.3.6
 $AppWindowTitle = 'Cursor Profile Manager'
 $SingleInstanceMutexName = 'Local\CursorProfileManager_GUI_v1'
-$script:AppVersionId = '1.3.5'
+$script:AppVersionId = '1.3.6'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
 $script:InstallRoot = $PSScriptRoot

@@ -4,6 +4,12 @@ All notable user-facing changes to Cursor Profile Manager.
 
 Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (when applicable). Newest dates first.
 
+## 2026-07-01 (4)
+
+### Changed
+
+- Release marker bumped to **1.3.6** (`# App-Version` / `$script:AppVersionId`).
+
 ## 2026-07-01 (3)
 
 ### Added

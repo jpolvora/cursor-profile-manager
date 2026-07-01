@@ -146,7 +146,7 @@ Click **Check for updates** in the footer status bar. The manager reads the `# A
 
 On apply, it downloads `cursor-profile-manager.ps1`, `cursor-profile-manager.bat`, and `install-desktop-shortcut.ps1`, replaces them in the folder you launched from, then restarts. Existing `.bat` launchers and Desktop shortcuts keep working.
 
-Current release marker in the main script: `# App-Version: 1.3.5` / `$script:AppVersionId` (also shown in the footer as `v1.3.5`).
+Current release marker in the main script: `# App-Version: 1.3.6` / `$script:AppVersionId` (also shown in the footer as `v1.3.6`).
 
 ## Unit tests
 
