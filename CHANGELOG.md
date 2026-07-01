@@ -12,7 +12,9 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ### Changed
 
+- **GUI refresh** — Segoe UI theme, docked layout, styled grid and toolbar, accent **Start** button, Cursor icon, and polished Add/Edit dialog.
 - **Add/Edit profile dialog** — project folder field shows optional label and placeholder hint when empty.
+- **Grid double-click** — starts the double-clicked profile row (uses row index, not prior selection).
 
 ### Fixed
 

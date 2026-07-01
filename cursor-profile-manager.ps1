@@ -123,6 +123,90 @@ $UiStatusIdle = "$([char]0x25CB) Idle"
 $UiStartLabel = "Start $([char]0x25B6)"
 
 # ---------------------------------------------------------------------------
+# UI theme
+# ---------------------------------------------------------------------------
+
+$script:UiFont = New-Object System.Drawing.Font 'Segoe UI', 9
+$script:UiFontSemibold = New-Object System.Drawing.Font 'Segoe UI', 9, ([System.Drawing.FontStyle]::Bold)
+$script:UiBackColor = [System.Drawing.Color]::FromArgb(245, 246, 248)
+$script:UiPanelColor = [System.Drawing.Color]::White
+$script:UiBorderColor = [System.Drawing.Color]::FromArgb(220, 223, 228)
+$script:UiTextMuted = [System.Drawing.Color]::FromArgb(96, 101, 108)
+$script:UiTextPrimary = [System.Drawing.Color]::FromArgb(32, 33, 36)
+$script:UiAccent = [System.Drawing.Color]::FromArgb(0, 102, 204)
+$script:UiAccentHover = [System.Drawing.Color]::FromArgb(0, 90, 184)
+$script:UiAccentText = [System.Drawing.Color]::White
+$script:UiGridHeader = [System.Drawing.Color]::FromArgb(248, 249, 251)
+$script:UiGridAltRow = [System.Drawing.Color]::FromArgb(250, 251, 253)
+$script:UiSelectionBack = [System.Drawing.Color]::FromArgb(204, 229, 255)
+$script:UiSelectionFore = [System.Drawing.Color]::FromArgb(32, 33, 36)
+$script:UiRunningColor = [System.Drawing.Color]::FromArgb(16, 124, 65)
+$script:UiIdleColor = [System.Drawing.Color]::FromArgb(120, 124, 130)
+
+function Set-FormIcon {
+    param([System.Windows.Forms.Form]$TargetForm)
+
+    $cursorPath = Find-CursorExecutable
+    if ($cursorPath) {
+        $TargetForm.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($cursorPath)
+    }
+}
+
+function Set-ButtonFlatStyle {
+    param(
+        [System.Windows.Forms.Button]$Button,
+        [switch]$Primary
+    )
+
+    $Button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $Button.Font = $script:UiFont
+    $Button.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $Button.UseVisualStyleBackColor = $false
+
+    if ($Primary) {
+        $Button.BackColor = $script:UiAccent
+        $Button.ForeColor = $script:UiAccentText
+        $Button.FlatAppearance.BorderSize = 0
+        $Button.Font = $script:UiFontSemibold
+        $Button.Add_MouseEnter({ $this.BackColor = $script:UiAccentHover })
+        $Button.Add_MouseLeave({ $this.BackColor = $script:UiAccent })
+    }
+    else {
+        $Button.BackColor = $script:UiPanelColor
+        $Button.ForeColor = $script:UiTextPrimary
+        $Button.FlatAppearance.BorderColor = $script:UiBorderColor
+        $Button.FlatAppearance.BorderSize = 1
+        $Button.Add_MouseEnter({ $this.BackColor = $script:UiGridAltRow })
+        $Button.Add_MouseLeave({ $this.BackColor = $script:UiPanelColor })
+    }
+}
+
+function Apply-DataGridTheme {
+    param([System.Windows.Forms.DataGridView]$TargetGrid)
+
+    $TargetGrid.BackgroundColor = $script:UiPanelColor
+    $TargetGrid.BorderStyle = [System.Windows.Forms.BorderStyle]::None
+    $TargetGrid.CellBorderStyle = [System.Windows.Forms.DataGridViewCellBorderStyle]::SingleHorizontal
+    $TargetGrid.GridColor = $script:UiBorderColor
+    $TargetGrid.EnableHeadersVisualStyles = $false
+    $TargetGrid.ColumnHeadersBorderStyle = [System.Windows.Forms.DataGridViewHeaderBorderStyle]::None
+    $TargetGrid.ColumnHeadersHeight = 32
+    $TargetGrid.ColumnHeadersHeightSizeMode = [System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode]::DisableResizing
+    $TargetGrid.RowTemplate.Height = 30
+    $TargetGrid.AlternatingRowsDefaultCellStyle.BackColor = $script:UiGridAltRow
+    $TargetGrid.DefaultCellStyle.BackColor = $script:UiPanelColor
+    $TargetGrid.DefaultCellStyle.ForeColor = $script:UiTextPrimary
+    $TargetGrid.DefaultCellStyle.SelectionBackColor = $script:UiSelectionBack
+    $TargetGrid.DefaultCellStyle.SelectionForeColor = $script:UiSelectionFore
+    $TargetGrid.DefaultCellStyle.Padding = New-Object System.Windows.Forms.Padding(4, 0, 4, 0)
+    $TargetGrid.ColumnHeadersDefaultCellStyle.BackColor = $script:UiGridHeader
+    $TargetGrid.ColumnHeadersDefaultCellStyle.ForeColor = $script:UiTextPrimary
+    $TargetGrid.ColumnHeadersDefaultCellStyle.Font = $script:UiFontSemibold
+    $TargetGrid.ColumnHeadersDefaultCellStyle.Alignment = [System.Windows.Forms.DataGridViewContentAlignment]::MiddleLeft
+    $TargetGrid.ColumnHeadersDefaultCellStyle.Padding = New-Object System.Windows.Forms.Padding(6, 0, 4, 0)
+}
+
+# ---------------------------------------------------------------------------
 # Storage
 # ---------------------------------------------------------------------------
 
@@ -373,49 +457,56 @@ function Show-ProfileDialog {
 
     $dlg = New-Object System.Windows.Forms.Form
     $dlg.Text = if ($isEdit) { "Edit Profile" } else { "Add Profile" }
-    $dlg.Size = New-Object System.Drawing.Size(480, 300)
+    $dlg.Size = New-Object System.Drawing.Size(500, 360)
     $dlg.StartPosition = 'CenterParent'
     $dlg.FormBorderStyle = 'FixedDialog'
     $dlg.MaximizeBox = $false
     $dlg.MinimizeBox = $false
+    $dlg.Font = $script:UiFont
+    $dlg.BackColor = $script:UiBackColor
+    [void](Set-FormIcon -TargetForm $dlg)
 
     $y = 20
-    $labelWidth = 110
-    $fieldX = 140
-    $fieldWidth = 300
+    $labelWidth = 130
+    $fieldX = 150
+    $fieldWidth = 290
+    $browseWidth = 72
 
     # Name
     $lblName = New-Object System.Windows.Forms.Label
     $lblName.Text = 'Profile name:'
-    $lblName.Location = New-Object System.Drawing.Point(20, $y)
+    $lblName.Location = New-Object System.Drawing.Point(20, ($y + 2))
     $lblName.Size = New-Object System.Drawing.Size($labelWidth, 20)
+    $lblName.ForeColor = $script:UiTextPrimary
     $dlg.Controls.Add($lblName)
 
     $txtName = New-Object System.Windows.Forms.TextBox
-    $txtName.Location = New-Object System.Drawing.Point($fieldX, ($y - 3))
-    $txtName.Size = New-Object System.Drawing.Size($fieldWidth, 20)
+    $txtName.Location = New-Object System.Drawing.Point($fieldX, $y)
+    $txtName.Size = New-Object System.Drawing.Size($fieldWidth, 23)
     if ($isEdit) { $txtName.Text = $Existing.Name }
     $dlg.Controls.Add($txtName)
 
-    $y += 35
+    $y += 38
 
     # User data dir
     $lblDir = New-Object System.Windows.Forms.Label
     $lblDir.Text = 'User data dir:'
-    $lblDir.Location = New-Object System.Drawing.Point(20, $y)
+    $lblDir.Location = New-Object System.Drawing.Point(20, ($y + 2))
     $lblDir.Size = New-Object System.Drawing.Size($labelWidth, 20)
+    $lblDir.ForeColor = $script:UiTextPrimary
     $dlg.Controls.Add($lblDir)
 
     $txtDir = New-Object System.Windows.Forms.TextBox
-    $txtDir.Location = New-Object System.Drawing.Point($fieldX, ($y - 3))
-    $txtDir.Size = New-Object System.Drawing.Size(230, 20)
+    $txtDir.Location = New-Object System.Drawing.Point($fieldX, $y)
+    $txtDir.Size = New-Object System.Drawing.Size(($fieldWidth - $browseWidth - 8), 23)
     if ($isEdit) { $txtDir.Text = $Existing.UserDataDir }
     $dlg.Controls.Add($txtDir)
 
     $btnBrowseDir = New-Object System.Windows.Forms.Button
-    $btnBrowseDir.Text = '...'
-    $btnBrowseDir.Location = New-Object System.Drawing.Point(380, ($y - 4))
-    $btnBrowseDir.Size = New-Object System.Drawing.Size(60, 23)
+    $btnBrowseDir.Text = 'Browse'
+    $btnBrowseDir.Location = New-Object System.Drawing.Point(($fieldX + $txtDir.Width + 8), ($y - 1))
+    $btnBrowseDir.Size = New-Object System.Drawing.Size($browseWidth, 25)
+    Set-ButtonFlatStyle -Button $btnBrowseDir
     $btnBrowseDir.Add_Click({
         $fbd = New-Object System.Windows.Forms.FolderBrowserDialog
         $fbd.Description = 'Select (or create) a user-data-dir folder for this profile'
@@ -426,18 +517,19 @@ function Show-ProfileDialog {
     })
     $dlg.Controls.Add($btnBrowseDir)
 
-    $y += 35
+    $y += 38
 
     # Project path
     $lblProj = New-Object System.Windows.Forms.Label
     $lblProj.Text = 'Project folder (optional):'
-    $lblProj.Location = New-Object System.Drawing.Point(20, $y)
-    $lblProj.AutoSize = $true
+    $lblProj.Location = New-Object System.Drawing.Point(20, ($y + 2))
+    $lblProj.Size = New-Object System.Drawing.Size($labelWidth, 20)
+    $lblProj.ForeColor = $script:UiTextPrimary
     $dlg.Controls.Add($lblProj)
 
     $txtProj = New-Object System.Windows.Forms.TextBox
-    $txtProj.Location = New-Object System.Drawing.Point($fieldX, ($y - 3))
-    $txtProj.Size = New-Object System.Drawing.Size(230, 20)
+    $txtProj.Location = New-Object System.Drawing.Point($fieldX, $y)
+    $txtProj.Size = New-Object System.Drawing.Size(($fieldWidth - $browseWidth - 8), 23)
     if ($isEdit) { $txtProj.Text = $Existing.ProjectPath }
     $dlg.Controls.Add($txtProj)
 
@@ -446,9 +538,10 @@ function Show-ProfileDialog {
     })
 
     $btnBrowseProj = New-Object System.Windows.Forms.Button
-    $btnBrowseProj.Text = '...'
-    $btnBrowseProj.Location = New-Object System.Drawing.Point(380, ($y - 4))
-    $btnBrowseProj.Size = New-Object System.Drawing.Size(60, 23)
+    $btnBrowseProj.Text = 'Browse'
+    $btnBrowseProj.Location = New-Object System.Drawing.Point(($fieldX + $txtProj.Width + 8), ($y - 1))
+    $btnBrowseProj.Size = New-Object System.Drawing.Size($browseWidth, 25)
+    Set-ButtonFlatStyle -Button $btnBrowseProj
     $btnBrowseProj.Add_Click({
         $fbd = New-Object System.Windows.Forms.FolderBrowserDialog
         $fbd.Description = 'Select a project folder to open with this profile (optional)'
@@ -459,45 +552,56 @@ function Show-ProfileDialog {
     })
     $dlg.Controls.Add($btnBrowseProj)
 
-    $y += 35
+    $y += 38
 
     # Notes
     $lblNotes = New-Object System.Windows.Forms.Label
     $lblNotes.Text = 'Notes:'
-    $lblNotes.Location = New-Object System.Drawing.Point(20, $y)
+    $lblNotes.Location = New-Object System.Drawing.Point(20, ($y + 2))
     $lblNotes.Size = New-Object System.Drawing.Size($labelWidth, 20)
+    $lblNotes.ForeColor = $script:UiTextPrimary
     $dlg.Controls.Add($lblNotes)
 
     $txtNotes = New-Object System.Windows.Forms.TextBox
-    $txtNotes.Location = New-Object System.Drawing.Point($fieldX, ($y - 3))
-    $txtNotes.Size = New-Object System.Drawing.Size($fieldWidth, 20)
+    $txtNotes.Location = New-Object System.Drawing.Point($fieldX, $y)
+    $txtNotes.Size = New-Object System.Drawing.Size($fieldWidth, 23)
     if ($isEdit) { $txtNotes.Text = $Existing.Notes }
     $dlg.Controls.Add($txtNotes)
 
-    $y += 45
+    $y += 42
+
+    $sepHint = New-Object System.Windows.Forms.Panel
+    $sepHint.Location = New-Object System.Drawing.Point(20, $y)
+    $sepHint.Size = New-Object System.Drawing.Size(440, 1)
+    $sepHint.BackColor = $script:UiBorderColor
+    $dlg.Controls.Add($sepHint)
+
+    $y += 12
 
     $lblHint = New-Object System.Windows.Forms.Label
-    $lblHint.Text = "Sign in to a different Cursor account the first time this`nprofile launches. Theme, fonts and extensions are saved`nper-profile automatically."
+    $lblHint.Text = "Sign in to a different Cursor account the first time this profile launches.`nTheme, fonts, and extensions are saved per profile automatically."
     $lblHint.Location = New-Object System.Drawing.Point(20, $y)
-    $lblHint.Size = New-Object System.Drawing.Size(430, 50)
-    $lblHint.ForeColor = [System.Drawing.Color]::DimGray
+    $lblHint.Size = New-Object System.Drawing.Size(440, 36)
+    $lblHint.ForeColor = $script:UiTextMuted
     $dlg.Controls.Add($lblHint)
 
-    $y += 65
+    $y += 48
 
     $btnOk = New-Object System.Windows.Forms.Button
     $btnOk.Text = if ($isEdit) { 'Save' } else { 'Add' }
-    $btnOk.Location = New-Object System.Drawing.Point(280, $y)
-    $btnOk.Size = New-Object System.Drawing.Size(80, 28)
+    $btnOk.Location = New-Object System.Drawing.Point(298, $y)
+    $btnOk.Size = New-Object System.Drawing.Size(82, 30)
     $btnOk.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    Set-ButtonFlatStyle -Button $btnOk -Primary
     $dlg.Controls.Add($btnOk)
     $dlg.AcceptButton = $btnOk
 
     $btnCancel = New-Object System.Windows.Forms.Button
     $btnCancel.Text = 'Cancel'
-    $btnCancel.Location = New-Object System.Drawing.Point(370, $y)
-    $btnCancel.Size = New-Object System.Drawing.Size(80, 28)
+    $btnCancel.Location = New-Object System.Drawing.Point(388, $y)
+    $btnCancel.Size = New-Object System.Drawing.Size(82, 30)
     $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    Set-ButtonFlatStyle -Button $btnCancel
     $dlg.Controls.Add($btnCancel)
     $dlg.CancelButton = $btnCancel
 
@@ -514,7 +618,7 @@ function Show-ProfileDialog {
         $txtDir.Add_TextChanged({ if ($txtDir.Tag -ne 'auto') { $txtDir.Tag = 'manual' } })
     }
 
-    $result = $dlg.ShowDialog()
+    $result = $dlg.ShowDialog($form)
 
     if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
         return $null
@@ -547,14 +651,56 @@ $script:Profiles = Load-Profiles
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = $AppWindowTitle
-$form.Size = New-Object System.Drawing.Size(820, 480)
+$form.Size = New-Object System.Drawing.Size(860, 520)
 $form.StartPosition = 'CenterScreen'
-$form.MinimumSize = New-Object System.Drawing.Size(700, 380)
+$form.MinimumSize = New-Object System.Drawing.Size(720, 420)
+$form.Font = $script:UiFont
+$form.BackColor = $script:UiBackColor
+[void](Set-FormIcon -TargetForm $form)
+
+$statusPanel = New-Object System.Windows.Forms.Panel
+$statusPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
+$statusPanel.Height = 30
+$statusPanel.BackColor = $script:UiPanelColor
+$statusPanel.Padding = New-Object System.Windows.Forms.Padding(14, 0, 14, 0)
+
+$lblStatus = New-Object System.Windows.Forms.Label
+$lblStatus.Text = "Profiles dir: $ProfilesRoot"
+$lblStatus.Dock = [System.Windows.Forms.DockStyle]::Fill
+$lblStatus.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+$lblStatus.ForeColor = $script:UiTextMuted
+$statusPanel.Controls.Add($lblStatus)
+
+$toolbarPanel = New-Object System.Windows.Forms.Panel
+$toolbarPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
+$toolbarPanel.Height = 52
+$toolbarPanel.BackColor = $script:UiPanelColor
+$toolbarPanel.Padding = New-Object System.Windows.Forms.Padding(12, 10, 12, 10)
+
+$toolbarSep = New-Object System.Windows.Forms.Panel
+$toolbarSep.Dock = [System.Windows.Forms.DockStyle]::Bottom
+$toolbarSep.Height = 1
+$toolbarSep.BackColor = $script:UiBorderColor
+
+$contentPanel = New-Object System.Windows.Forms.Panel
+$contentPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
+$contentPanel.BackColor = $script:UiBackColor
+$contentPanel.Padding = New-Object System.Windows.Forms.Padding(14, 14, 14, 8)
+
+$lblGridHint = New-Object System.Windows.Forms.Label
+$lblGridHint.Text = 'Double-click a row to start a new window for that profile.'
+$lblGridHint.Dock = [System.Windows.Forms.DockStyle]::Bottom
+$lblGridHint.Height = 22
+$lblGridHint.ForeColor = $script:UiTextMuted
+$lblGridHint.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+
+$gridHost = New-Object System.Windows.Forms.Panel
+$gridHost.Dock = [System.Windows.Forms.DockStyle]::Fill
+$gridHost.BackColor = $script:UiPanelColor
+$gridHost.Padding = New-Object System.Windows.Forms.Padding(1)
 
 $grid = New-Object System.Windows.Forms.DataGridView
-$grid.Location = New-Object System.Drawing.Point(12, 12)
-$grid.Size = New-Object System.Drawing.Size(796, 370)
-$grid.Anchor = 'Top, Bottom, Left, Right'
+$grid.Dock = [System.Windows.Forms.DockStyle]::Fill
 $grid.AllowUserToAddRows = $false
 $grid.AllowUserToDeleteRows = $false
 $grid.ReadOnly = $true
@@ -579,12 +725,19 @@ $grid.Columns['Notes'].FillWeight = 130
 
 # Reduce paint flicker during frequent status updates.
 $grid.GetType().GetProperty('DoubleBuffered', [System.Reflection.BindingFlags]'Instance, NonPublic').SetValue($grid, $true, $null)
+Apply-DataGridTheme -TargetGrid $grid
 
-$form.Controls.Add($grid)
+$gridHost.Controls.Add($grid)
+$contentPanel.Controls.Add($gridHost)
+$contentPanel.Controls.Add($lblGridHint)
+$form.Controls.Add($contentPanel)
+$form.Controls.Add($toolbarSep)
+$form.Controls.Add($toolbarPanel)
+$form.Controls.Add($statusPanel)
 
 $script:GridModel = $null
-$script:DefaultGridForeColor = $grid.DefaultCellStyle.ForeColor
-$script:RunningGridForeColor = [System.Drawing.Color]::SeaGreen
+$script:DefaultGridForeColor = $script:UiTextPrimary
+$script:RunningGridForeColor = $script:UiRunningColor
 
 function New-GridRowModel {
     param(
@@ -681,8 +834,11 @@ function Sync-GridRowToView {
     if ([string]$cells['Notes'].Value -ne $ModelRow.Notes) {
         $cells['Notes'].Value = $ModelRow.Notes
     }
-    if ($cells['Status'].Style.ForeColor -ne $foreColor) {
-        $cells['Status'].Style.ForeColor = $foreColor
+    $statusColor = if ($ModelRow.IsRunning) { $script:RunningGridForeColor } else { $script:UiIdleColor }
+    if ($cells['Status'].Style.ForeColor -ne $statusColor) {
+        $cells['Status'].Style.ForeColor = $statusColor
+    }
+    if ($cells['Instances'].Style.ForeColor -ne $foreColor) {
         $cells['Instances'].Style.ForeColor = $foreColor
     }
 }
@@ -753,49 +909,64 @@ function Get-SelectedProfile {
     return $script:Profiles | Where-Object { $_.Id -eq $id } | Select-Object -First 1
 }
 
+function Get-ProfileFromGridRow {
+    param([Parameter(Mandatory)][int]$RowIndex)
+
+    if ($RowIndex -lt 0 -or $RowIndex -ge $grid.Rows.Count) { return $null }
+    $id = $grid.Rows[$RowIndex].Tag
+    if (-not $id) { return $null }
+    return $script:Profiles | Where-Object { $_.Id -eq $id } | Select-Object -First 1
+}
+
+function Start-ProfileFromGridRow {
+    param([Parameter(Mandatory)][int]$RowIndex)
+
+    $profile = Get-ProfileFromGridRow -RowIndex $RowIndex
+    if (-not $profile) { return $false }
+    Start-CursorProfileInstance -Profile $profile
+    Request-DeferredGridRefresh
+    return $true
+}
+
 $btnAdd = New-Object System.Windows.Forms.Button
 $btnAdd.Text = 'Add'
-$btnAdd.Location = New-Object System.Drawing.Point(12, 394)
-$btnAdd.Size = New-Object System.Drawing.Size(90, 32)
-$btnAdd.Anchor = 'Bottom, Left'
-$form.Controls.Add($btnAdd)
+$btnAdd.Size = New-Object System.Drawing.Size(88, 32)
+$btnAdd.Location = New-Object System.Drawing.Point(12, 10)
+Set-ButtonFlatStyle -Button $btnAdd
+$toolbarPanel.Controls.Add($btnAdd)
 
 $btnEdit = New-Object System.Windows.Forms.Button
 $btnEdit.Text = 'Edit'
-$btnEdit.Location = New-Object System.Drawing.Point(110, 394)
-$btnEdit.Size = New-Object System.Drawing.Size(90, 32)
-$btnEdit.Anchor = 'Bottom, Left'
-$form.Controls.Add($btnEdit)
+$btnEdit.Size = New-Object System.Drawing.Size(88, 32)
+$btnEdit.Location = New-Object System.Drawing.Point(108, 10)
+Set-ButtonFlatStyle -Button $btnEdit
+$toolbarPanel.Controls.Add($btnEdit)
 
 $btnDelete = New-Object System.Windows.Forms.Button
 $btnDelete.Text = 'Delete'
-$btnDelete.Location = New-Object System.Drawing.Point(208, 394)
-$btnDelete.Size = New-Object System.Drawing.Size(90, 32)
-$btnDelete.Anchor = 'Bottom, Left'
-$form.Controls.Add($btnDelete)
+$btnDelete.Size = New-Object System.Drawing.Size(88, 32)
+$btnDelete.Location = New-Object System.Drawing.Point(204, 10)
+Set-ButtonFlatStyle -Button $btnDelete
+$toolbarPanel.Controls.Add($btnDelete)
 
 $btnRefresh = New-Object System.Windows.Forms.Button
 $btnRefresh.Text = 'Refresh'
-$btnRefresh.Location = New-Object System.Drawing.Point(306, 394)
-$btnRefresh.Size = New-Object System.Drawing.Size(90, 32)
-$btnRefresh.Anchor = 'Bottom, Left'
-$form.Controls.Add($btnRefresh)
+$btnRefresh.Size = New-Object System.Drawing.Size(88, 32)
+$btnRefresh.Location = New-Object System.Drawing.Point(300, 10)
+Set-ButtonFlatStyle -Button $btnRefresh
+$toolbarPanel.Controls.Add($btnRefresh)
 
 $btnStart = New-Object System.Windows.Forms.Button
 $btnStart.Text = $UiStartLabel
-$btnStart.Location = New-Object System.Drawing.Point(698, 394)
-$btnStart.Size = New-Object System.Drawing.Size(110, 32)
-$btnStart.Anchor = 'Bottom, Right'
-$btnStart.Font = New-Object System.Drawing.Font($btnStart.Font, [System.Drawing.FontStyle]::Bold)
-$form.Controls.Add($btnStart)
+$btnStart.Size = New-Object System.Drawing.Size(112, 32)
+$btnStart.Anchor = 'Top, Right'
+Set-ButtonFlatStyle -Button $btnStart -Primary
+$toolbarPanel.Controls.Add($btnStart)
 
-$lblStatus = New-Object System.Windows.Forms.Label
-$lblStatus.Text = "Profiles dir: $ProfilesRoot"
-$lblStatus.Location = New-Object System.Drawing.Point(12, 432)
-$lblStatus.Size = New-Object System.Drawing.Size(700, 20)
-$lblStatus.Anchor = 'Bottom, Left'
-$lblStatus.ForeColor = [System.Drawing.Color]::DimGray
-$form.Controls.Add($lblStatus)
+$toolbarPanel.Add_Resize({
+    $btnStart.Location = New-Object System.Drawing.Point(($toolbarPanel.ClientSize.Width - $btnStart.Width - 12), 10)
+})
+$btnStart.Location = New-Object System.Drawing.Point(($toolbarPanel.ClientSize.Width - $btnStart.Width - 12), 10)
 
 $btnAdd.Add_Click({
     $result = Show-ProfileDialog -Existing $null
@@ -888,11 +1059,7 @@ $btnRefresh.Add_Click({ Update-ProfileGrid })
 $grid.Add_CellDoubleClick({
     param($s, $e)
     if ($e.RowIndex -ge 0) {
-        $selected = Get-SelectedProfile
-        if ($selected) {
-            Start-CursorProfileInstance -Profile $selected
-            Request-DeferredGridRefresh
-        }
+        [void](Start-ProfileFromGridRow -RowIndex $e.RowIndex)
     }
 })
 
