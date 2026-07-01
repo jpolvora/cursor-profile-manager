@@ -32,8 +32,8 @@ Override with `CURSOR_PROFILES_DIR`. Override binary with `CURSOR_BIN`.
 The main script carries a release marker used by **Check for updates**:
 
 ```powershell
-# App-Version: 1.2.0
-$script:AppVersionId = '1.2.0'
+# App-Version: 1.2.1
+$script:AppVersionId = '1.2.1'
 ```
 
 Rules:

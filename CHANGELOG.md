@@ -14,6 +14,7 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ### Changed
 
+- **Footer version label** — current app version shown beside **Check for updates** (e.g. `v1.2.1`).
 - **Check for updates** — uses `# App-Version` / `$script:AppVersionId` (missing marker = outdated; update when GitHub is greater; force reinstall with confirmation when not newer).
 - **Grid columns** — order is now Name, User Data Dir, Instances, Status, Notes; Project column removed from the grid (still editable in Add/Edit).
 

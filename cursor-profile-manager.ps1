@@ -16,10 +16,10 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 1.2.0
+# App-Version: 1.2.1
 $AppWindowTitle = 'Cursor Profile Manager'
 $SingleInstanceMutexName = 'Local\CursorProfileManager_GUI_v1'
-$script:AppVersionId = '1.2.0'
+$script:AppVersionId = '1.2.1'
 $script:InstallRoot = $PSScriptRoot
 $script:UpdateRepoId = 'jpolvora/cursor-profile-manager'
 $script:UpdateBranch = 'master'
@@ -511,10 +511,12 @@ function Apply-UiThemeToMainWindow {
             $script:ThemeCombo.ForeColor = $script:UiInputForeColor
         }
         if ($script:CheckUpdateLink) {
+            $script:CheckUpdateLink.ForeColor = $script:UiTextMuted
             $script:CheckUpdateLink.LinkColor = $script:UiAccent
             $script:CheckUpdateLink.ActiveLinkColor = $script:UiAccentHover
             $script:CheckUpdateLink.VisitedLinkColor = $script:UiAccent
             $script:CheckUpdateLink.BackColor = $script:UiPanelColor
+            Set-CheckUpdateLinkDisplay
         }
 
         Sync-UiThemeComboSelection
@@ -707,6 +709,16 @@ function Get-RemoteUpdateFileContent {
     finally {
         [Net.ServicePointManager]::SecurityProtocol = $previousProtocol
     }
+}
+
+function Set-CheckUpdateLinkDisplay {
+    if (-not $script:CheckUpdateLink) { return }
+
+    $versionText = "v$($script:AppVersionId)  "
+    $linkText = 'Check for updates'
+    $script:CheckUpdateLink.Text = $versionText + $linkText
+    $script:CheckUpdateLink.Links.Clear()
+    [void]$script:CheckUpdateLink.Links.Add($versionText.Length, $linkText.Length)
 }
 
 function Get-RemoteManagedUpdateFiles {
@@ -1273,15 +1285,16 @@ $lblStatus.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
 $lblStatus.ForeColor = $script:UiTextMuted
 
 $script:CheckUpdateLink = New-Object System.Windows.Forms.LinkLabel
-$script:CheckUpdateLink.Text = 'Check for updates'
 $script:CheckUpdateLink.AutoSize = $true
 $script:CheckUpdateLink.Dock = [System.Windows.Forms.DockStyle]::Right
 $script:CheckUpdateLink.Padding = New-Object System.Windows.Forms.Padding(0, 7, 0, 0)
+$script:CheckUpdateLink.ForeColor = $script:UiTextMuted
 $script:CheckUpdateLink.LinkColor = $script:UiAccent
 $script:CheckUpdateLink.ActiveLinkColor = $script:UiAccentHover
 $script:CheckUpdateLink.VisitedLinkColor = $script:UiAccent
 $script:CheckUpdateLink.BackColor = $script:UiPanelColor
 $script:CheckUpdateLink.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+Set-CheckUpdateLinkDisplay
 $script:CheckUpdateLink.Add_LinkClicked({
     $script:CheckUpdateLink.Enabled = $false
     $form.UseWaitCursor = $true

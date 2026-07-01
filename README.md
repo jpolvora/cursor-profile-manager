@@ -49,7 +49,7 @@ Re-run after moving this folder to repair the shortcut.
 | **Single instance** | Second launch activates the existing manager window |
 | **Persistence** | Profiles saved to `profiles.json` in the profiles directory |
 | **Theme** | Light, dark, or **System default** (follows Windows app theme); toolbar selector; saved in `settings.json` |
-| **Check for updates** | Footer link fetches latest scripts from [GitHub](https://github.com/jpolvora/cursor-profile-manager) and overwrites the install folder in place (`.bat` and Desktop shortcuts keep working) |
+| **Check for updates** | Footer link (with current `v#.#.#` beside it) compares `App-Version` markers against GitHub `master` and overwrites the install folder in place (`.bat` and Desktop shortcuts keep working) |
 | **Safe delete** | Optional data-folder removal; blocked while any instance is running |
 
 ## Usage
@@ -143,7 +143,7 @@ Click **Check for updates** in the footer status bar. The manager reads the `# A
 
 On apply, it downloads `cursor-profile-manager.ps1`, `cursor-profile-manager.bat`, and `install-desktop-shortcut.ps1`, replaces them in the folder you launched from, then restarts. Existing `.bat` launchers and Desktop shortcuts keep working.
 
-Current release marker in the main script: `# App-Version: 1.2.0` / `$script:AppVersionId`.
+Current release marker in the main script: `# App-Version: 1.2.1` / `$script:AppVersionId` (also shown in the footer as `v1.2.1`).
 
 ### Manual launch (without the GUI)
 
