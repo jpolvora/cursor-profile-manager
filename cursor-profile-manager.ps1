@@ -100,6 +100,23 @@ function Initialize-SingleInstance {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+if (-not ('TextBoxCue' -as [type])) {
+    Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class TextBoxCue {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+
+    public static void SetCue(IntPtr handle, string cue) {
+        if (handle != IntPtr.Zero) {
+            SendMessage(handle, 0x1501, IntPtr.Zero, cue);
+        }
+    }
+}
+'@
+}
+
 # Build UI symbols via code points so the script stays ASCII-safe under Windows PowerShell 5.1.
 $UiStatusRunning = "$([char]0x25CF) Running"
 $UiStatusIdle = "$([char]0x25CB) Idle"
@@ -413,9 +430,9 @@ function Show-ProfileDialog {
 
     # Project path
     $lblProj = New-Object System.Windows.Forms.Label
-    $lblProj.Text = 'Project folder:'
+    $lblProj.Text = 'Project folder (optional):'
     $lblProj.Location = New-Object System.Drawing.Point(20, $y)
-    $lblProj.Size = New-Object System.Drawing.Size($labelWidth, 20)
+    $lblProj.AutoSize = $true
     $dlg.Controls.Add($lblProj)
 
     $txtProj = New-Object System.Windows.Forms.TextBox
@@ -423,6 +440,10 @@ function Show-ProfileDialog {
     $txtProj.Size = New-Object System.Drawing.Size(230, 20)
     if ($isEdit) { $txtProj.Text = $Existing.ProjectPath }
     $dlg.Controls.Add($txtProj)
+
+    $dlg.Add_Load({
+        [TextBoxCue]::SetCue($txtProj.Handle, 'Leave empty to open with no folder on Start')
+    })
 
     $btnBrowseProj = New-Object System.Windows.Forms.Button
     $btnBrowseProj.Text = '...'

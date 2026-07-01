@@ -52,7 +52,7 @@ Re-run after moving this folder to repair the shortcut.
 
 1. Open the Profile Manager.
 2. Add a profile (name auto-suggests a folder under `.cursor-profiles\`).
-3. Optionally set a default project folder.
+3. Optionally set a default project folder (leave blank to open with no folder on Start).
 4. Click **Start ▶** (or double-click the row) — Cursor opens with `--user-data-dir` and `--new-window`.
 5. Click **Start ▶** again to open another window for the same profile.
 6. On first launch, sign in with the account for that profile; settings and extensions persist there.

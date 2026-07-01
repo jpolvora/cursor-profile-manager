@@ -10,6 +10,10 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 - **Tray notifications** — balloon tips on instance start/stop/count change (removed with the buggy notification loop).
 
+### Changed
+
+- **Add/Edit profile dialog** — project folder field shows optional label and placeholder hint when empty.
+
 ### Fixed
 
 - **Multiple windows per profile** — when a profile already has a window open, Start opens a new window instead of focusing the existing one; repeat launches with a default project use `--new-window` then `--add` (Cursor reuses the window if the same folder is passed in one command).
