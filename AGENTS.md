@@ -32,8 +32,8 @@ Override with `CURSOR_PROFILES_DIR`. Override binary with `CURSOR_BIN`.
 The main script carries a release marker used by **Check for updates**:
 
 ```powershell
-# App-Version: 1.2.1
-$script:AppVersionId = '1.2.1'
+# App-Version: 1.2.5
+$script:AppVersionId = '1.2.5'
 ```
 
 Rules:
@@ -77,12 +77,14 @@ Key modules inside the script:
 
 | Area | Functions | Notes |
 |------|-----------|-------|
-| Single instance | `Initialize-SingleInstance`, `Show-ExistingAppWindow` | Named mutex + Win32 foreground |
+| Single instance | `Initialize-SingleInstance`, `Show-ExistingAppWindow`, `Initialize-Win32AppFocus` | Named mutex + Win32 foreground |
 | Storage | `Load-Profiles`, `Save-Profiles`, `New-ProfileObject`, `Load-AppSettings`, `Save-AppSettings` | UTF-8 JSON |
 | UI theme | `Get-UiThemePalettes`, `Test-WindowsAppsUseLightTheme`, `Set-UiThemePalette`, `Set-UiThemePreference`, `Apply-UiThemeToMainWindow` | Light/dark palettes; `default` follows Windows `AppsUseLightTheme` |
 | In-app update | `Invoke-CheckForAppUpdate`, `Get-AppVersionIdFromScriptContent`, `Compare-AppVersionId`, `Start-DeferredAppUpdate` | Raw GitHub `master` files; version compare via `# App-Version` / `$script:AppVersionId`; deferred copy after exit |
 | Process scan | `Get-UserDataDirInstanceCounts`, `Get-ProfileInstanceCount` | CIM `Win32_Process`; count `--type=renderer` per user-data-dir (one window each) |
 | Launch | `Find-CursorExecutable`, `Start-CursorProfileInstance` | |
+| Focus | `Get-CursorProfileWindowHandles`, `Invoke-FocusCursorProfile`, `Sync-RunningProfileButtonState` | EnumWindows by profile PIDs; cycles when multiple windows |
+| Close | `Invoke-CloseAllCursorProfileInstances` | WM_CLOSE on profile windows, then force-stop remaining PIDs |
 | Grid model | `Build-GridModel`, `Test-GridModelEqual`, `Update-ProfileGrid` | View separated from UI |
 | Grid view sync | `Apply-GridModelToView`, `Sync-GridRowToView` | In-place cell updates |
 | Notifications | *(removed)* | Was tray balloon on instance count change |
@@ -92,6 +94,7 @@ Key modules inside the script:
 
 ## When editing
 
+0. **Before implementing**, follow [Before implementing](#before-implementing) — verify planned code against the PowerShell baseline (or propose a minimal version upgrade).
 1. Update `cursor-profile-manager.ps1` and `README.md` together.
 2. Update this file if file roles, launch contract, or architecture change.
 3. **Bump the app version** in `cursor-profile-manager.ps1` (see [App version ID](#app-version-id)) on every improvement session or commit that changes shipped scripts.
@@ -143,6 +146,20 @@ Do not skip the changelog for “small” GUI tweaks — if the user would notic
 
 ---
 
+## Before implementing
+
+Before writing or changing code, **think through the plan** against this repo’s constraints — do not start coding until compatibility is clear.
+
+1. **Identify the PowerShell baseline** — scripts currently require **Windows PowerShell 5.1** (`#Requires -Version 5.1`; desktop `powershell.exe`). Every planned cmdlet, operator, type, and API must work on that baseline.
+2. **Check planned code for version-specific features** — common PS 7-only traps: null-coalescing (`??`), ternary (`? :`), `-AsHashtable`, `ForEach-Object -Parallel`, `ConvertFrom-Json -AsHashtable`, pipeline chain operators (`&&`, `||`), and changed default behavior in built-in cmdlets. WinForms and CIM usage here must also remain valid on 5.1.
+3. **If 5.1 is not enough** — do not silently use newer syntax. Instead:
+   - State **why** the feature needs a higher version.
+   - Propose a **minimal** `#Requires` bump (e.g. `7.4`) and whether the project should target `pwsh` instead of `powershell.exe`.
+   - List user impact (install step, `.bat` wrapper change, README note) and get explicit approval before raising requirements.
+4. **Prefer 5.1-compatible alternatives** when they are equally clear — e.g. `if ($x) { $x } else { $y }` instead of `??`, explicit hashtables instead of `-AsHashtable`.
+
+Default: stay on **5.1** unless the user approves a documented minimum-version upgrade.
+
 ## PowerShell programming recommendations
 
 Conventions used in this repo. Follow them for new code and refactors.
@@ -151,7 +168,7 @@ Conventions used in this repo. Follow them for new code and refactors.
 
 - Start every script with `#Requires -Version 5.1`.
 - Set `$ErrorActionPreference = 'Stop'` at the top (after `param()`).
-- Target **Windows PowerShell 5.1** (desktop `powershell.exe`), not PowerShell 7-only features (`??`, ternary, `-AsHashtable`, etc.) unless the project scope changes.
+- Target **Windows PowerShell 5.1** (desktop `powershell.exe`), not PowerShell 7-only features (`??`, ternary, `-AsHashtable`, etc.) unless the project scope changes (see [Before implementing](#before-implementing)).
 
 ### Encoding and string literals
 

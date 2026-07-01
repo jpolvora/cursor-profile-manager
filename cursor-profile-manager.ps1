@@ -16,10 +16,10 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 1.2.1
+# App-Version: 1.2.5
 $AppWindowTitle = 'Cursor Profile Manager'
 $SingleInstanceMutexName = 'Local\CursorProfileManager_GUI_v1'
-$script:AppVersionId = '1.2.1'
+$script:AppVersionId = '1.2.5'
 $script:InstallRoot = $PSScriptRoot
 $script:UpdateRepoId = 'jpolvora/cursor-profile-manager'
 $script:UpdateBranch = 'master'
@@ -29,15 +29,18 @@ $script:UpdateManagedFiles = @(
     'install-desktop-shortcut.ps1'
 )
 
-function Show-ExistingAppWindow {
-    param([Parameter(Mandatory)][string]$WindowTitle)
+function Initialize-Win32AppFocus {
+    if ('Win32AppFocus' -as [type]) { return }
 
-    if (-not ('Win32AppFocus' -as [type])) {
-        Add-Type @'
+    Add-Type @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 public static class Win32AppFocus {
     public const int SW_RESTORE = 9;
+    public const uint WM_CLOSE = 0x0010;
+    private const uint GW_OWNER = 4;
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern IntPtr FindWindow(string lpClassName, string lpWindowTitle);
     [DllImport("user32.dll")]
@@ -52,10 +55,28 @@ public static class Win32AppFocus {
     public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr processId);
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
     [DllImport("kernel32.dll")]
     public static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")]
     public static extern bool AttachThreadInput(uint attachThread, uint attachToThread, bool attach);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+    public static void CloseWindow(IntPtr hWnd) {
+        if (hWnd != IntPtr.Zero) {
+            PostMessage(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        }
+    }
     public static void ForceForegroundWindow(IntPtr hWnd) {
         if (hWnd == IntPtr.Zero) { return; }
         if (IsIconic(hWnd)) {
@@ -75,9 +96,33 @@ public static class Win32AppFocus {
             SetForegroundWindow(hWnd);
         }
     }
+    public static List<IntPtr> GetVisibleTopLevelWindowsForProcesses(int[] processIds) {
+        var pidSet = new HashSet<uint>();
+        if (processIds != null) {
+            foreach (int id in processIds) {
+                pidSet.Add((uint)id);
+            }
+        }
+        var handles = new List<IntPtr>();
+        EnumWindows((hWnd, lParam) => {
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+            if (!pidSet.Contains(pid)) { return true; }
+            if (!IsWindowVisible(hWnd)) { return true; }
+            if (GetWindow(hWnd, GW_OWNER) != IntPtr.Zero) { return true; }
+            handles.Add(hWnd);
+            return true;
+        }, IntPtr.Zero);
+        return handles;
+    }
 }
 '@
-    }
+}
+
+function Show-ExistingAppWindow {
+    param([Parameter(Mandatory)][string]$WindowTitle)
+
+    Initialize-Win32AppFocus
 
     for ($attempt = 0; $attempt -lt 15; $attempt++) {
         $hwnd = [Win32AppFocus]::FindWindow($null, $WindowTitle)
@@ -106,6 +151,7 @@ function Initialize-SingleInstance {
 }
 
 [void](Initialize-SingleInstance -MutexName $SingleInstanceMutexName)
+Initialize-Win32AppFocus
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -458,21 +504,115 @@ function Sync-UiThemeComboSelection {
     }
 }
 
-function Update-ToolbarLayout {
-    if (-not $toolbarPanel -or -not $btnStart) { return }
+function New-ToolbarButton {
+    param(
+        [Parameter(Mandatory)][string]$Text,
+        [switch]$Primary,
+        [int]$Width = 0
+    )
 
-    $startX = $toolbarPanel.ClientSize.Width - $btnStart.Width - 12
-    $btnStart.Location = New-Object System.Drawing.Point($startX, 10)
+    $btn = New-Object System.Windows.Forms.Button
+    $btn.Text = $Text
+    $buttonWidth = if ($Width -gt 0) { $Width } elseif ($Primary) { 108 } else { 82 }
+    $btn.Size = New-Object System.Drawing.Size($buttonWidth, 30)
+    $btn.Margin = New-Object System.Windows.Forms.Padding 0, 0, 8, 0
+    $btn.AutoSize = $false
+    if ($Primary) {
+        Set-ButtonFlatStyle -Button $btn -Primary
+    }
+    else {
+        Set-ButtonFlatStyle -Button $btn
+    }
+    return $btn
+}
 
+function New-ToolbarFlowSeparator {
+    $sep = New-Object System.Windows.Forms.Panel
+    $sep.Width = 1
+    $sep.Height = 22
+    $sep.Margin = New-Object System.Windows.Forms.Padding 6, 4, 14, 4
+    $sep.BackColor = $script:UiBorderColor
+    return $sep
+}
+
+function New-ToolbarSectionLabel {
+    param([Parameter(Mandatory)][string]$Text)
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = $Text
+    $label.AutoSize = $false
+    $label.Width = 58
+    $label.Height = 30
+    $label.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+    $label.ForeColor = $script:UiTextMuted
+    $label.BackColor = $script:UiPanelColor
+    $label.Font = $script:UiFont
+    $label.Margin = New-Object System.Windows.Forms.Padding 0, 0, 4, 0
+    return $label
+}
+
+function Apply-ToolbarTheme {
+    if (-not $toolbarPanel) { return }
+
+    $toolbarPanel.BackColor = $script:UiPanelColor
+    if ($script:ToolbarTable) {
+        $script:ToolbarTable.BackColor = $script:UiPanelColor
+    }
+    if ($script:ToolbarRowSep) {
+        $script:ToolbarRowSep.BackColor = $script:UiBorderColor
+    }
+    if ($script:ProfileToolbarSeparator) {
+        $script:ProfileToolbarSeparator.BackColor = $script:UiBorderColor
+    }
+    if ($script:LblProfilesSection) {
+        $script:LblProfilesSection.ForeColor = $script:UiTextMuted
+        $script:LblProfilesSection.BackColor = $script:UiPanelColor
+    }
+    if ($script:LblLaunchHint) {
+        $script:LblLaunchHint.ForeColor = $script:UiTextMuted
+        $script:LblLaunchHint.BackColor = $script:UiPanelColor
+    }
+    if ($script:ProfileFlow) {
+        $script:ProfileFlow.BackColor = $script:UiPanelColor
+    }
+    if ($script:ThemeFlow) {
+        $script:ThemeFlow.BackColor = $script:UiPanelColor
+    }
+    if ($script:ActionsHost) {
+        $script:ActionsHost.BackColor = $script:UiPanelColor
+    }
+    if ($script:ActionsFlow) {
+        $script:ActionsFlow.BackColor = $script:UiPanelColor
+    }
+    if ($script:LaunchTable) {
+        $script:LaunchTable.BackColor = $script:UiPanelColor
+    }
+    if ($script:ProfileTable) {
+        $script:ProfileTable.BackColor = $script:UiPanelColor
+    }
+
+    if ($btnAdd) {
+        Update-ToolbarButtonTheme -Button $btnAdd
+        Update-ToolbarButtonTheme -Button $btnEdit
+        Update-ToolbarButtonTheme -Button $btnDelete
+        Update-ToolbarButtonTheme -Button $btnRefresh
+        Update-ToolbarButtonTheme -Button $btnFolder
+    }
+    if ($btnCloseAll) {
+        Update-ToolbarButtonTheme -Button $btnCloseAll
+    }
+    if ($btnFocus) {
+        Update-ToolbarButtonTheme -Button $btnFocus
+    }
+    Update-ToolbarButtonTheme -Button $btnStart -Primary
+
+    if ($script:ThemeLabel) {
+        $script:ThemeLabel.ForeColor = $script:UiTextMuted
+        $script:ThemeLabel.BackColor = $script:UiPanelColor
+    }
     if ($script:ThemeCombo) {
-        $themeWidth = 118
-        $themeLabelWidth = 42
-        $gap = 8
-        $script:ThemeCombo.Width = $themeWidth
-        $script:ThemeCombo.Location = New-Object System.Drawing.Point(($startX - $gap - $themeWidth), 12)
-        if ($script:ThemeLabel) {
-            $script:ThemeLabel.Location = New-Object System.Drawing.Point(($startX - $gap - $themeWidth - $themeLabelWidth - 4), 16)
-        }
+        $script:ThemeCombo.BackColor = $script:UiInputBackColor
+        $script:ThemeCombo.ForeColor = $script:UiInputForeColor
     }
 }
 
@@ -490,26 +630,12 @@ function Apply-UiThemeToMainWindow {
         $toolbarSep.BackColor = $script:UiBorderColor
 
         $contentPanel.BackColor = $script:UiBackColor
-        $lblGridHint.ForeColor = $script:UiTextMuted
 
         $gridHost.BackColor = $script:UiPanelColor
         Apply-DataGridTheme -TargetGrid $grid
 
-        Update-ToolbarButtonTheme -Button $btnAdd
-        Update-ToolbarButtonTheme -Button $btnEdit
-        Update-ToolbarButtonTheme -Button $btnDelete
-        Update-ToolbarButtonTheme -Button $btnRefresh
-        Update-ToolbarButtonTheme -Button $btnFolder
-        Update-ToolbarButtonTheme -Button $btnStart -Primary
+        Apply-ToolbarTheme
 
-        if ($script:ThemeLabel) {
-            $script:ThemeLabel.ForeColor = $script:UiTextMuted
-            $script:ThemeLabel.BackColor = $script:UiPanelColor
-        }
-        if ($script:ThemeCombo) {
-            $script:ThemeCombo.BackColor = $script:UiInputBackColor
-            $script:ThemeCombo.ForeColor = $script:UiInputForeColor
-        }
         if ($script:CheckUpdateLink) {
             $script:CheckUpdateLink.ForeColor = $script:UiTextMuted
             $script:CheckUpdateLink.LinkColor = $script:UiAccent
@@ -520,7 +646,6 @@ function Apply-UiThemeToMainWindow {
         }
 
         Sync-UiThemeComboSelection
-        Update-ToolbarLayout
     }
     finally {
         $form.ResumeLayout($true)
@@ -950,6 +1075,163 @@ function Get-ProfileInstanceCount {
     return 0
 }
 
+function Get-CursorProcessIdsForUserDataDir {
+    param([Parameter(Mandatory)][string]$UserDataDir)
+
+    $norm = $UserDataDir.TrimEnd('\', '/').ToLowerInvariant()
+    $pids = @()
+    $procs = @(Get-CimInstance Win32_Process -Filter "name='Cursor.exe'" -ErrorAction SilentlyContinue)
+
+    foreach ($p in $procs) {
+        $cmd = $p.CommandLine
+        if (-not $cmd -or $cmd -notmatch '--user-data-dir[= ]"?([^"]+?)"?(\s--|\s|$)') { continue }
+        $dir = $matches[1].TrimEnd('\', '/').ToLowerInvariant()
+        if ($dir -ne $norm) { continue }
+        $pids += [int]$p.ProcessId
+    }
+
+    return $pids
+}
+
+function Get-CursorProfileWindowHandles {
+    param([Parameter(Mandatory)][string]$UserDataDir)
+
+    Initialize-Win32AppFocus
+
+    $pids = @(Get-CursorProcessIdsForUserDataDir -UserDataDir $UserDataDir)
+    if ($pids.Count -eq 0) { return @() }
+
+    $handles = [Win32AppFocus]::GetVisibleTopLevelWindowsForProcesses([int[]]$pids)
+    if ($handles.Count -gt 0) {
+        return @($handles | Sort-Object { $_.ToInt64() })
+    }
+
+    $fallback = @()
+    foreach ($procId in $pids) {
+        try {
+            $proc = Get-Process -Id $procId -ErrorAction Stop
+            if ($proc.MainWindowHandle -ne [IntPtr]::Zero) {
+                $fallback += $proc.MainWindowHandle
+            }
+        }
+        catch {
+        }
+    }
+
+    return @($fallback | Sort-Object { $_.ToInt64() })
+}
+
+$script:FocusCycleByDir = @{}
+
+function Invoke-FocusCursorProfile {
+    param([Parameter(Mandatory)][PSCustomObject]$Profile)
+
+    $instanceCounts = Get-UserDataDirInstanceCounts
+    $runningCount = Get-ProfileInstanceCount -UserDataDir $Profile.UserDataDir -InstanceCounts $instanceCounts
+    if ($runningCount -le 0) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "No running Cursor windows were found for '$($Profile.Name)'.",
+            'Profile not running',
+            'OK',
+            'Information') | Out-Null
+        return $false
+    }
+
+    $handles = @(Get-CursorProfileWindowHandles -UserDataDir $Profile.UserDataDir)
+    if ($handles.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Cursor is running for '$($Profile.Name)', but no window could be brought to the front.",
+            'Window not found',
+            'OK',
+            'Warning') | Out-Null
+        return $false
+    }
+
+    $norm = $Profile.UserDataDir.TrimEnd('\', '/').ToLowerInvariant()
+    $index = 0
+    if ($handles.Count -gt 1) {
+        if ($script:FocusCycleByDir.ContainsKey($norm)) {
+            $index = ($script:FocusCycleByDir[$norm] + 1) % $handles.Count
+        }
+        $script:FocusCycleByDir[$norm] = $index
+    }
+
+    [Win32AppFocus]::ForceForegroundWindow($handles[$index])
+    return $true
+}
+
+function Invoke-CloseAllCursorProfileInstances {
+    param([Parameter(Mandatory)][PSCustomObject]$Profile)
+
+    $instanceCounts = Get-UserDataDirInstanceCounts
+    $runningCount = Get-ProfileInstanceCount -UserDataDir $Profile.UserDataDir -InstanceCounts $instanceCounts
+    if ($runningCount -le 0) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "No running Cursor windows were found for '$($Profile.Name)'.",
+            'Profile not running',
+            'OK',
+            'Information') | Out-Null
+        return $false
+    }
+
+    $instanceLabel = if ($runningCount -eq 1) { '1 window' } else { "$runningCount windows" }
+    $confirm = [System.Windows.Forms.MessageBox]::Show(
+        "Close all Cursor windows for '$($Profile.Name)' ($instanceLabel)?`n`nUnsaved work in those windows may be lost.",
+        'Close all',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Warning)
+    if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return $false }
+
+    Initialize-Win32AppFocus
+
+    $handles = @(Get-CursorProfileWindowHandles -UserDataDir $Profile.UserDataDir)
+    foreach ($hwnd in $handles) {
+        [Win32AppFocus]::CloseWindow($hwnd)
+    }
+
+    $deadline = [datetime]::UtcNow.AddSeconds(5)
+    while ([datetime]::UtcNow -lt $deadline) {
+        $remaining = @(Get-CursorProcessIdsForUserDataDir -UserDataDir $Profile.UserDataDir)
+        if ($remaining.Count -eq 0) { break }
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep -Milliseconds 200
+    }
+
+    $remaining = @(Get-CursorProcessIdsForUserDataDir -UserDataDir $Profile.UserDataDir)
+    foreach ($procId in $remaining) {
+        try {
+            Stop-Process -Id $procId -Force -ErrorAction Stop
+        }
+        catch {
+        }
+    }
+
+    $norm = $Profile.UserDataDir.TrimEnd('\', '/').ToLowerInvariant()
+    if ($script:FocusCycleByDir.ContainsKey($norm)) {
+        [void]$script:FocusCycleByDir.Remove($norm)
+    }
+
+    Request-DeferredGridRefresh
+    return $true
+}
+
+function Sync-RunningProfileButtonState {
+    $enabled = $false
+    $selected = Get-SelectedProfile
+    if ($selected) {
+        $instanceCounts = Get-UserDataDirInstanceCounts
+        $runningCount = Get-ProfileInstanceCount -UserDataDir $selected.UserDataDir -InstanceCounts $instanceCounts
+        $enabled = ($runningCount -gt 0)
+    }
+
+    if ($btnFocus) {
+        $btnFocus.Enabled = $enabled
+    }
+    if ($btnCloseAll) {
+        $btnCloseAll.Enabled = $enabled
+    }
+}
+
 function Start-CursorProcessWatchers {
     param(
         [System.Windows.Forms.Form]$OwnerForm,
@@ -1319,9 +1601,100 @@ $statusPanel.Controls.Add($lblStatus)
 
 $toolbarPanel = New-Object System.Windows.Forms.Panel
 $toolbarPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
-$toolbarPanel.Height = 52
+$toolbarPanel.Height = 96
 $toolbarPanel.BackColor = $script:UiPanelColor
-$toolbarPanel.Padding = New-Object System.Windows.Forms.Padding(12, 10, 12, 10)
+$toolbarPanel.Padding = New-Object System.Windows.Forms.Padding(14, 8, 14, 10)
+
+$script:ToolbarTable = New-Object System.Windows.Forms.TableLayoutPanel
+$script:ToolbarTable.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:ToolbarTable.RowCount = 3
+$script:ToolbarTable.ColumnCount = 1
+$script:ToolbarTable.Margin = New-Object System.Windows.Forms.Padding 0
+$script:ToolbarTable.Padding = New-Object System.Windows.Forms.Padding 0
+[void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 36)))
+[void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 1)))
+[void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 36)))
+[void]$script:ToolbarTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+
+$script:ProfileTable = New-Object System.Windows.Forms.TableLayoutPanel
+$script:ProfileTable.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:ProfileTable.RowCount = 1
+$script:ProfileTable.ColumnCount = 2
+$script:ProfileTable.Margin = New-Object System.Windows.Forms.Padding 0
+$script:ProfileTable.Padding = New-Object System.Windows.Forms.Padding 0
+[void]$script:ProfileTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 58)))
+[void]$script:ProfileTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+
+$script:LblProfilesSection = New-ToolbarSectionLabel -Text 'Profiles'
+$script:ProfileFlow = New-Object System.Windows.Forms.FlowLayoutPanel
+$script:ProfileFlow.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:ProfileFlow.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
+$script:ProfileFlow.WrapContents = $false
+$script:ProfileFlow.Margin = New-Object System.Windows.Forms.Padding 0
+$script:ProfileFlow.Padding = New-Object System.Windows.Forms.Padding 0
+$script:ProfileFlow.AutoSize = $false
+
+$script:ProfileTable.Controls.Add($script:LblProfilesSection, 0, 0)
+$script:ProfileTable.Controls.Add($script:ProfileFlow, 1, 0)
+$script:ToolbarTable.Controls.Add($script:ProfileTable, 0, 0)
+
+$script:ToolbarRowSep = New-Object System.Windows.Forms.Panel
+$script:ToolbarRowSep.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:ToolbarRowSep.Margin = New-Object System.Windows.Forms.Padding 0, 2, 0, 2
+$script:ToolbarRowSep.BackColor = $script:UiBorderColor
+$script:ToolbarTable.Controls.Add($script:ToolbarRowSep, 0, 1)
+
+$script:LaunchTable = New-Object System.Windows.Forms.TableLayoutPanel
+$script:LaunchTable.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:LaunchTable.RowCount = 1
+$script:LaunchTable.ColumnCount = 3
+$script:LaunchTable.Margin = New-Object System.Windows.Forms.Padding 0
+$script:LaunchTable.Padding = New-Object System.Windows.Forms.Padding 0
+[void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
+[void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+[void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
+
+$script:ThemeFlow = New-Object System.Windows.Forms.FlowLayoutPanel
+$script:ThemeFlow.AutoSize = $true
+$script:ThemeFlow.Anchor = [System.Windows.Forms.AnchorStyles]::Left
+$script:ThemeFlow.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
+$script:ThemeFlow.WrapContents = $false
+$script:ThemeFlow.Margin = New-Object System.Windows.Forms.Padding 0
+$script:ThemeFlow.Padding = New-Object System.Windows.Forms.Padding 0
+
+$script:LblLaunchHint = New-Object System.Windows.Forms.Label
+$script:LblLaunchHint.Text = 'Double-click a profile to start  |  Focus switches to a running window'
+$script:LblLaunchHint.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:LblLaunchHint.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+$script:LblLaunchHint.ForeColor = $script:UiTextMuted
+$script:LblLaunchHint.BackColor = $script:UiPanelColor
+$script:LblLaunchHint.Margin = New-Object System.Windows.Forms.Padding 12, 0, 12, 0
+$script:LblLaunchHint.AutoEllipsis = $true
+
+$script:ActionsHost = New-Object System.Windows.Forms.Panel
+$script:ActionsHost.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:ActionsHost.Margin = New-Object System.Windows.Forms.Padding 0
+$script:ActionsHost.Padding = New-Object System.Windows.Forms.Padding 0
+
+$script:ActionsFlow = New-Object System.Windows.Forms.FlowLayoutPanel
+$script:ActionsFlow.AutoSize = $true
+$script:ActionsFlow.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+$script:ActionsFlow.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
+$script:ActionsFlow.WrapContents = $false
+$script:ActionsFlow.Margin = New-Object System.Windows.Forms.Padding 0
+$script:ActionsFlow.Padding = New-Object System.Windows.Forms.Padding 0
+
+$script:ActionsHost.Controls.Add($script:ActionsFlow)
+$script:ActionsHost.Add_Resize({
+    if (-not $script:ActionsFlow) { return }
+    $x = [Math]::Max(0, $script:ActionsHost.ClientSize.Width - $script:ActionsFlow.Width)
+    $script:ActionsFlow.Location = New-Object System.Drawing.Point($x, 0)
+})
+$script:LaunchTable.Controls.Add($script:ThemeFlow, 0, 0)
+$script:LaunchTable.Controls.Add($script:LblLaunchHint, 1, 0)
+$script:LaunchTable.Controls.Add($script:ActionsHost, 2, 0)
+$script:ToolbarTable.Controls.Add($script:LaunchTable, 0, 2)
+$toolbarPanel.Controls.Add($script:ToolbarTable)
 
 $toolbarSep = New-Object System.Windows.Forms.Panel
 $toolbarSep.Dock = [System.Windows.Forms.DockStyle]::Bottom
@@ -1331,14 +1704,7 @@ $toolbarSep.BackColor = $script:UiBorderColor
 $contentPanel = New-Object System.Windows.Forms.Panel
 $contentPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
 $contentPanel.BackColor = $script:UiBackColor
-$contentPanel.Padding = New-Object System.Windows.Forms.Padding(14, 14, 14, 8)
-
-$lblGridHint = New-Object System.Windows.Forms.Label
-$lblGridHint.Text = 'Double-click a row to start a new window for that profile.'
-$lblGridHint.Dock = [System.Windows.Forms.DockStyle]::Bottom
-$lblGridHint.Height = 22
-$lblGridHint.ForeColor = $script:UiTextMuted
-$lblGridHint.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+$contentPanel.Padding = New-Object System.Windows.Forms.Padding(14, 14, 14, 14)
 
 $gridHost = New-Object System.Windows.Forms.Panel
 $gridHost.Dock = [System.Windows.Forms.DockStyle]::Fill
@@ -1373,7 +1739,6 @@ Apply-DataGridTheme -TargetGrid $grid
 
 $gridHost.Controls.Add($grid)
 $contentPanel.Controls.Add($gridHost)
-$contentPanel.Controls.Add($lblGridHint)
 $form.Controls.Add($contentPanel)
 $form.Controls.Add($toolbarSep)
 $form.Controls.Add($toolbarPanel)
@@ -1535,6 +1900,7 @@ function Update-ProfileGrid {
 
     Apply-GridModelToView -Model $newModel -PreviousModel $previousModel
     $script:GridModel = $newModel
+    Sync-RunningProfileButtonState
 }
 
 function Request-DeferredGridRefresh {
@@ -1597,60 +1963,33 @@ function Open-ProfileUserDataDir {
     return $true
 }
 
-$btnAdd = New-Object System.Windows.Forms.Button
-$btnAdd.Text = 'Add'
-$btnAdd.Size = New-Object System.Drawing.Size(88, 32)
-$btnAdd.Location = New-Object System.Drawing.Point(12, 10)
-Set-ButtonFlatStyle -Button $btnAdd
-$toolbarPanel.Controls.Add($btnAdd)
-
-$btnEdit = New-Object System.Windows.Forms.Button
-$btnEdit.Text = 'Edit'
-$btnEdit.Size = New-Object System.Drawing.Size(88, 32)
-$btnEdit.Location = New-Object System.Drawing.Point(108, 10)
-Set-ButtonFlatStyle -Button $btnEdit
-$toolbarPanel.Controls.Add($btnEdit)
-
-$btnDelete = New-Object System.Windows.Forms.Button
-$btnDelete.Text = 'Delete'
-$btnDelete.Size = New-Object System.Drawing.Size(88, 32)
-$btnDelete.Location = New-Object System.Drawing.Point(204, 10)
-Set-ButtonFlatStyle -Button $btnDelete
-$toolbarPanel.Controls.Add($btnDelete)
-
-$btnRefresh = New-Object System.Windows.Forms.Button
-$btnRefresh.Text = 'Refresh'
-$btnRefresh.Size = New-Object System.Drawing.Size(88, 32)
-$btnRefresh.Location = New-Object System.Drawing.Point(300, 10)
-Set-ButtonFlatStyle -Button $btnRefresh
-$toolbarPanel.Controls.Add($btnRefresh)
-
-$btnFolder = New-Object System.Windows.Forms.Button
-$btnFolder.Text = 'Folder'
-$btnFolder.Size = New-Object System.Drawing.Size(88, 32)
-$btnFolder.Location = New-Object System.Drawing.Point(396, 10)
-Set-ButtonFlatStyle -Button $btnFolder
-$toolbarPanel.Controls.Add($btnFolder)
-
-$btnStart = New-Object System.Windows.Forms.Button
-$btnStart.Text = $UiStartLabel
-$btnStart.Size = New-Object System.Drawing.Size(112, 32)
-$btnStart.Anchor = 'Top, Right'
-Set-ButtonFlatStyle -Button $btnStart -Primary
-$toolbarPanel.Controls.Add($btnStart)
+$btnAdd = New-ToolbarButton -Text 'Add'
+$btnEdit = New-ToolbarButton -Text 'Edit'
+$btnDelete = New-ToolbarButton -Text 'Delete'
+$script:ProfileToolbarSeparator = New-ToolbarFlowSeparator
+$btnRefresh = New-ToolbarButton -Text 'Refresh'
+$btnFolder = New-ToolbarButton -Text 'Folder'
+$script:ProfileFlow.Controls.AddRange(@(
+    $btnAdd,
+    $btnEdit,
+    $btnDelete,
+    $script:ProfileToolbarSeparator,
+    $btnRefresh,
+    $btnFolder
+))
 
 $script:ThemeLabel = New-Object System.Windows.Forms.Label
 $script:ThemeLabel.Text = 'Theme:'
 $script:ThemeLabel.AutoSize = $true
-$script:ThemeLabel.Anchor = 'Top, Right'
 $script:ThemeLabel.ForeColor = $script:UiTextMuted
 $script:ThemeLabel.BackColor = $script:UiPanelColor
-$toolbarPanel.Controls.Add($script:ThemeLabel)
+$script:ThemeLabel.Margin = New-Object System.Windows.Forms.Padding 0, 6, 4, 0
+$script:ThemeLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
 
 $script:ThemeCombo = New-Object System.Windows.Forms.ComboBox
 $script:ThemeCombo.DropDownStyle = 'DropDownList'
-$script:ThemeCombo.Anchor = 'Top, Right'
 $script:ThemeCombo.Size = New-Object System.Drawing.Size(118, 23)
+$script:ThemeCombo.Margin = New-Object System.Windows.Forms.Padding 0, 4, 0, 0
 [void]$script:ThemeCombo.Items.AddRange(@('System default', 'Light', 'Dark'))
 $script:ThemeCombo.SelectedIndex = Get-UiThemePreferenceIndex -Preference $script:UiThemePreference
 $script:ThemeCombo.BackColor = $script:UiInputBackColor
@@ -1661,10 +2000,16 @@ $script:ThemeCombo.Add_SelectedIndexChanged({
     if ($preference -eq $script:UiThemePreference) { return }
     Set-UiThemePreference -Preference $preference -Persist
 })
-$toolbarPanel.Controls.Add($script:ThemeCombo)
+$script:ThemeFlow.Controls.AddRange(@($script:ThemeLabel, $script:ThemeCombo))
 
-$toolbarPanel.Add_Resize({ Update-ToolbarLayout })
-Update-ToolbarLayout
+$btnCloseAll = New-ToolbarButton -Text 'Close all' -Width 92
+$btnCloseAll.Enabled = $false
+$btnFocus = New-ToolbarButton -Text 'Focus'
+$btnFocus.Enabled = $false
+$btnStart = New-ToolbarButton -Text $UiStartLabel -Primary
+$script:ActionsFlow.Controls.AddRange(@($btnCloseAll, $btnFocus, $btnStart))
+
+Apply-ToolbarTheme
 
 $btnAdd.Add_Click({
     $result = Show-ProfileDialog -Existing $null
@@ -1708,7 +2053,7 @@ $btnDelete.Add_Click({
     $instanceCount = Get-ProfileInstanceCount -UserDataDir $selected.UserDataDir -InstanceCounts $instanceCounts
     if ($instanceCount -gt 0) {
         [System.Windows.Forms.MessageBox]::Show(
-            "Close all running Cursor windows for '$($selected.Name)' ($instanceCount instance$(if ($instanceCount -ne 1) { 's' })) before deleting it.",
+            "Close all running Cursor windows for '$($selected.Name)' ($instanceCount instance$(if ($instanceCount -ne 1) { 's' })) before deleting it, or use Close all in the toolbar.",
             'Profile is running',
             'OK',
             'Warning') | Out-Null
@@ -1763,6 +2108,26 @@ $btnFolder.Add_Click({
     [void](Open-ProfileUserDataDir -Profile $selected)
 })
 
+$btnFocus.Add_Click({
+    $selected = Get-SelectedProfile
+    if (-not $selected) {
+        [System.Windows.Forms.MessageBox]::Show('Select a running profile to focus.', 'No selection', 'OK', 'Information') | Out-Null
+        return
+    }
+    [void](Invoke-FocusCursorProfile -Profile $selected)
+})
+
+$btnCloseAll.Add_Click({
+    $selected = Get-SelectedProfile
+    if (-not $selected) {
+        [System.Windows.Forms.MessageBox]::Show('Select a running profile to close.', 'No selection', 'OK', 'Information') | Out-Null
+        return
+    }
+    [void](Invoke-CloseAllCursorProfileInstances -Profile $selected)
+})
+
+$grid.Add_SelectionChanged({ Sync-RunningProfileButtonState })
+
 $grid.Add_CellDoubleClick({
     param($s, $e)
     if ($e.RowIndex -ge 0) {
@@ -1797,6 +2162,13 @@ $form.Add_FormClosing({
 })
 
 Update-ProfileGrid
+
+$form.Add_Load({
+    if ($script:ActionsHost -and $script:ActionsFlow) {
+        $x = [Math]::Max(0, $script:ActionsHost.ClientSize.Width - $script:ActionsFlow.Width)
+        $script:ActionsFlow.Location = New-Object System.Drawing.Point($x, 0)
+    }
+})
 
 try {
     [void]$form.ShowDialog()

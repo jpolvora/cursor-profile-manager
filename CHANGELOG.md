@@ -8,13 +8,23 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ### Added
 
+- **Focus** — toolbar button brings an existing Cursor window for the selected profile to the foreground; enabled when Instances > 0; repeated clicks cycle through multiple windows for the same profile.
+- **Close all** — toolbar button closes every Cursor window for the selected profile; enabled when Instances > 0; asks for confirmation and warns about unsaved work; force-terminates any processes that remain after a graceful close.
 - **Check for updates** — footer link compares `App-Version` markers against GitHub `master`, downloads newer scripts, overwrites the launch folder in place, then restarts (shortcuts unchanged).
 - **Folder button** — opens the selected profile's user-data-dir in File Explorer (creates the folder if it does not exist yet).
 - **GUI themes** — light and dark palettes plus **System default** (follows Windows app light/dark via `AppsUseLightTheme`); toolbar **Theme** dropdown; preference saved to `settings.json`.
 
 ### Changed
 
-- **Footer version label** — current app version shown beside **Check for updates** (e.g. `v1.2.1`).
+- **Toolbar layout** — docked two-row toolbar with section label, grouped profile actions, separator, contextual hints, and right-aligned launch actions (Close all, Focus, Start); uses `TableLayoutPanel` and `FlowLayoutPanel` instead of manual positioning.
+
+### Fixed
+
+- **Focus on Windows PowerShell 5.1** — no longer throws when resolving `List[uint]` during window lookup (uses `int[]` interop instead).
+
+### Changed
+
+- **Footer version label** — current app version shown beside **Check for updates** (e.g. `v1.2.5`).
 - **Check for updates** — uses `# App-Version` / `$script:AppVersionId` (missing marker = outdated; update when GitHub is greater; force reinstall with confirmation when not newer).
 - **Grid columns** — order is now Name, User Data Dir, Instances, Status, Notes; Project column removed from the grid (still editable in Add/Edit).
 

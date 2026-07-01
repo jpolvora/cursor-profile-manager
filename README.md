@@ -41,6 +41,8 @@ Re-run after moving this folder to repair the shortcut.
 | **Profile CRUD** | Add, edit, delete profiles (name, user-data-dir, default project folder, notes) |
 | **Folder** | Opens the selected profile's user-data-dir in File Explorer (creates the folder if missing) |
 | **Start ▶** | Opens another Cursor window for the selected profile (`--new-window`; multiple instances allowed) |
+| **Focus** | Brings an existing Cursor window for the selected profile to the foreground (enabled when Instances > 0; cycles windows when several are open) |
+| **Close all** | Closes every Cursor window for the selected profile (enabled when Instances > 0; warns about unsaved work) |
 | **Double-click row** | Same as Start |
 | **Status column** | `● Running` / `○ Idle` from live `Cursor.exe` process inspection |
 | **Instances column** | Count of running windows per profile (0, 1, 2, …) |
@@ -48,7 +50,7 @@ Re-run after moving this folder to repair the shortcut.
 | **Live updates** | WMI process create/exit events + 2 s fallback poll; grid updates only when data changes |
 | **Single instance** | Second launch activates the existing manager window |
 | **Persistence** | Profiles saved to `profiles.json` in the profiles directory |
-| **Theme** | Light, dark, or **System default** (follows Windows app theme); toolbar selector; saved in `settings.json` |
+| **Theme** | Light, dark, or **System default** (follows Windows app theme); bottom-toolbar dropdown; saved in `settings.json` |
 | **Check for updates** | Footer link (with current `v#.#.#` beside it) compares `App-Version` markers against GitHub `master` and overwrites the install folder in place (`.bat` and Desktop shortcuts keep working) |
 | **Safe delete** | Optional data-folder removal; blocked while any instance is running |
 
@@ -59,7 +61,9 @@ Re-run after moving this folder to repair the shortcut.
 3. Optionally set a default project folder (leave blank to open with no folder on Start).
 4. Click **Start ▶** (or double-click the row) — Cursor opens with `--user-data-dir` and `--new-window`.
 5. Click **Start ▶** again to open another window for the same profile.
-6. On first launch, sign in with the account for that profile; settings and extensions persist there.
+6. Select a running profile and click **Focus** to bring its Cursor window to the front (cycles when multiple windows are open).
+7. Use **Close all** to shut down every window for a running profile before delete or when finished.
+8. On first launch, sign in with the account for that profile; settings and extensions persist there.
 
 ## Technical details
 
@@ -143,7 +147,7 @@ Click **Check for updates** in the footer status bar. The manager reads the `# A
 
 On apply, it downloads `cursor-profile-manager.ps1`, `cursor-profile-manager.bat`, and `install-desktop-shortcut.ps1`, replaces them in the folder you launched from, then restarts. Existing `.bat` launchers and Desktop shortcuts keep working.
 
-Current release marker in the main script: `# App-Version: 1.2.1` / `$script:AppVersionId` (also shown in the footer as `v1.2.1`).
+Current release marker in the main script: `# App-Version: 1.2.5` / `$script:AppVersionId` (also shown in the footer as `v1.2.5`).
 
 ### Manual launch (without the GUI)
 
