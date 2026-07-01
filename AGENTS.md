@@ -8,6 +8,50 @@ Windows GUI utility to manage and launch **multiple isolated Cursor IDE instance
 
 **Scope:** GUI only — no CLI launchers, no macOS/Linux scripts, no build step.
 
+## Learnings (read before implementing)
+
+Hard-won failures from past sessions. **Read this section before writing or changing code** so the same mistakes are not repeated.
+
+### PowerShell 5.1 types and parameters
+
+| Mistake | Symptom | Do instead |
+|---------|---------|------------|
+| `New-Object 'System.Collections.Generic.List[uint]'` or passing `List[uint]` to `Add-Type` | `Cannot find type [System.Collections.Generic.List[uint]]` at runtime (e.g. on **Focus**) | Pass **`[int[]]`** to C# interop; cast to `uint` inside the C# method |
+| `[Parameter(Mandatory)][string]$HeaderText` with `-HeaderText ''` | App **fails to start** — `Cannot bind argument to parameter 'HeaderText' because it is an empty string` | Use `[AllowEmptyString()][string]$HeaderText = ''` when empty is valid |
+| `foreach ($pid in $pids)` | Subtle bugs — `$pid` shadows the automatic **`$PID`** variable | Use `$procId` or another name |
+| Generic `List[IntPtr]` in PS 5.1 helpers | May fail depending on environment | Prefer plain **`@()`** arrays and `[int[]]` casts |
+
+### WinForms layout
+
+| Mistake | Symptom | Do instead |
+|---------|---------|------------|
+| Manual `Location` / `Update-ToolbarLayout` for many toolbar buttons | Misaligned rows, clipped controls (Start as a thin blue strip) | **`TableLayoutPanel`** + **`FlowLayoutPanel`** with dock/fill; fixed **`Absolute`** column widths for button groups |
+| `TableLayoutPanel` column `AutoSize` for a panel of action buttons | Column collapses to ~0 width; buttons clip | Give the actions column a **fixed pixel width** (e.g. 116–310 px for the group) |
+| **`Dock = Fill` on toolbar Start (or any accent button) in a table cell** | Button paints as a large blue block over the launch row | **Never** dock-fill primary buttons; use fixed **Size**, **Anchor Right**, in a small host panel |
+| `ActionsHost` + manual `Resize` to right-align a `FlowLayoutPanel` | Fragile; easy to get wrong | **`FlowDirection = RightToLeft`** in a fixed-width cell, or dock fill in a sized column |
+| `ReadOnly = $true` on the whole `DataGridView` | **Button columns do not click** | Leave the grid editable; set **`ReadOnly = $true`** only on text columns |
+
+### WinForms grid action columns
+
+- Add button columns via **`DataGridViewButtonColumn`** with **`UseColumnTextForButtonValue = $true`**.
+- Handle clicks with **`CellContentClick`**, not `CellClick`.
+- Skip double-click Start when the click is on a button column (`DataGridViewButtonColumn`).
+- For running-only actions (Focus, Close): set **`$cell.ReadOnly = -not $IsRunning`** and muted **`ForeColor`** in `Sync-GridRowToView`.
+- Set action cells **`SelectionBackColor`** / **`BackColor`** to the row surface color so selected rows do not paint action buttons solid blue.
+- When adding columns, update **`Rows.Add`** arity (text columns + action columns) and keep **`$script:GridActionColumnCount`** in sync if used.
+
+### Win32 interop
+
+- Load **`Initialize-Win32AppFocus`** at **normal startup**, not only in the second-instance code path — otherwise Focus/foreground APIs are undefined on first launch.
+- Extend the existing guarded `Add-Type` block; do not duplicate Win32 types.
+
+### Verification
+
+- After GUI or startup-path changes, **run `cursor-profile-manager.ps1`** (or parse + launch smoke) — layout bugs often do not show up in static review alone.
+- With `$ErrorActionPreference = 'Stop'`, a single parameter-binding error **exits before `ShowDialog`** — user sees “app not starting”.
+
+When a new bug is fixed, **append a row or bullet here** (and add a **Fixed** changelog entry) so the next agent inherits it.
+
 ## File map
 
 | File | Role |
@@ -32,8 +76,8 @@ Override with `CURSOR_PROFILES_DIR`. Override binary with `CURSOR_BIN`.
 The main script carries a release marker used by **Check for updates**:
 
 ```powershell
-# App-Version: 1.2.5
-$script:AppVersionId = '1.2.5'
+# App-Version: 1.2.9
+$script:AppVersionId = '1.2.9'
 ```
 
 Rules:
@@ -83,8 +127,9 @@ Key modules inside the script:
 | In-app update | `Invoke-CheckForAppUpdate`, `Get-AppVersionIdFromScriptContent`, `Compare-AppVersionId`, `Start-DeferredAppUpdate` | Raw GitHub `master` files; version compare via `# App-Version` / `$script:AppVersionId`; deferred copy after exit |
 | Process scan | `Get-UserDataDirInstanceCounts`, `Get-ProfileInstanceCount` | CIM `Win32_Process`; count `--type=renderer` per user-data-dir (one window each) |
 | Launch | `Find-CursorExecutable`, `Start-CursorProfileInstance` | |
-| Focus | `Get-CursorProfileWindowHandles`, `Invoke-FocusCursorProfile`, `Sync-RunningProfileButtonState` | EnumWindows by profile PIDs; cycles when multiple windows |
+| Focus | `Get-CursorProfileWindowHandles`, `Invoke-FocusCursorProfile` | EnumWindows by profile PIDs; cycles when multiple windows |
 | Close | `Invoke-CloseAllCursorProfileInstances` | WM_CLOSE on profile windows, then force-stop remaining PIDs |
+| Grid actions | `Add-GridActionColumns`, `Invoke-GridProfileAction`, `Edit-Profile`, `Remove-Profile` | Per-row button columns; shared handlers for toolbar-free CRUD and window ops |
 | Grid model | `Build-GridModel`, `Test-GridModelEqual`, `Update-ProfileGrid` | View separated from UI |
 | Grid view sync | `Apply-GridModelToView`, `Sync-GridRowToView` | In-place cell updates |
 | Notifications | *(removed)* | Was tray balloon on instance count change |
@@ -94,7 +139,7 @@ Key modules inside the script:
 
 ## When editing
 
-0. **Before implementing**, follow [Before implementing](#before-implementing) — verify planned code against the PowerShell baseline (or propose a minimal version upgrade).
+0. **Read [Learnings (read before implementing)](#learnings-read-before-implementing)** and [Before implementing](#before-implementing) before writing code.
 1. Update `cursor-profile-manager.ps1` and `README.md` together.
 2. Update this file if file roles, launch contract, or architecture change.
 3. **Bump the app version** in `cursor-profile-manager.ps1` (see [App version ID](#app-version-id)) on every improvement session or commit that changes shipped scripts.
@@ -240,6 +285,10 @@ $UiStartLabel = "Start $([char]0x25B6)"        # Start ▶
 | `Register-ObjectEvent` for WinForms + WMI | `.add_EventArrived` + `BeginInvoke` |
 | New NuGet modules / PS galleries | WinForms + built-in CIM only |
 | PS 7-only syntax | PS 5.1-compatible constructs |
+| `List[uint]` / mandatory `[string]` params passed `''` | `[int[]]` interop; `[AllowEmptyString()]` on optional empty headers |
+| `$grid.ReadOnly = $true` with button columns | Text columns `ReadOnly`; use `CellContentClick` for buttons |
+| Toolbar buttons positioned by hand | `TableLayoutPanel` / `FlowLayoutPanel`; fixed-width action columns |
+| **`Dock = Fill` on a primary `Button` inside `TableLayoutPanel`** | Huge blue rectangle; hint row swallowed | Fixed **width + anchor right** in a host panel (see **Start** on profile row) |
 | Committing user `profiles.json` | Document path only |
 
 ### Adding a feature (checklist)

@@ -6,17 +6,33 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ## 2026-07-01
 
+### Fixed
+
+- **Toolbar Start button** — no longer renders as a large blue block (`Dock = Fill` removed; Start sits on the profile row with fixed size).
+- **Actions column** — smaller buttons (8 pt font, narrower columns); selected-row highlight no longer floods action cells blue.
+
+### Fixed
+
+- **Startup crash** — manager failed to open after the Actions column was added because blank action column headers were rejected by PowerShell parameter validation.
+
 ### Added
 
-- **Focus** — toolbar button brings an existing Cursor window for the selected profile to the foreground; enabled when Instances > 0; repeated clicks cycle through multiple windows for the same profile.
-- **Close all** — toolbar button closes every Cursor window for the selected profile; enabled when Instances > 0; asks for confirmation and warns about unsaved work; force-terminates any processes that remain after a graceful close.
+- **Actions column** — per-row grid buttons (Focus, Close, Folder, Edit, Delete) replace toolbar actions for individual profiles; Focus/Close are enabled only when Instances > 0.
+- **Focus** — brings an existing Cursor window for a profile to the foreground; cycles when multiple windows are open (grid Actions button).
+- **Close all** — closes every Cursor window for a profile with confirmation; force-terminates remaining processes after graceful close (grid Actions button).
 - **Check for updates** — footer link compares `App-Version` markers against GitHub `master`, downloads newer scripts, overwrites the launch folder in place, then restarts (shortcuts unchanged).
-- **Folder button** — opens the selected profile's user-data-dir in File Explorer (creates the folder if it does not exist yet).
+- **Folder button** — opens a profile's user-data-dir in File Explorer (grid Actions button).
 - **GUI themes** — light and dark palettes plus **System default** (follows Windows app light/dark via `AppsUseLightTheme`); toolbar **Theme** dropdown; preference saved to `settings.json`.
 
 ### Changed
 
-- **Toolbar layout** — docked two-row toolbar with section label, grouped profile actions, separator, contextual hints, and right-aligned launch actions (Close all, Focus, Start); uses `TableLayoutPanel` and `FlowLayoutPanel` instead of manual positioning.
+- **AGENTS.md** — added **Learnings (read before implementing)** section so agents review past PS 5.1 / WinForms pitfalls before coding.
+- **Toolbar** — profile row keeps Add and Refresh only; launch row keeps Theme and Start.
+- **Toolbar layout** — docked two-row toolbar with section label, grouped profile actions, separator, contextual hints, and Start on the launch row.
+
+### Removed
+
+- **Toolbar profile actions** — Edit, Delete, Folder, Focus, and Close all removed from the toolbar (use per-row Actions column instead).
 
 ### Fixed
 
@@ -24,7 +40,7 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ### Changed
 
-- **Footer version label** — current app version shown beside **Check for updates** (e.g. `v1.2.5`).
+- **Footer version label** — current app version shown beside **Check for updates** (e.g. `v1.2.9`).
 - **Check for updates** — uses `# App-Version` / `$script:AppVersionId` (missing marker = outdated; update when GitHub is greater; force reinstall with confirmation when not newer).
 - **Grid columns** — order is now Name, User Data Dir, Instances, Status, Notes; Project column removed from the grid (still editable in Add/Edit).
 

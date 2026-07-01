@@ -16,10 +16,11 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 1.2.5
+# App-Version: 1.2.9
 $AppWindowTitle = 'Cursor Profile Manager'
 $SingleInstanceMutexName = 'Local\CursorProfileManager_GUI_v1'
-$script:AppVersionId = '1.2.5'
+$script:AppVersionId = '1.2.9'
+$script:GridActionColumnCount = 5
 $script:InstallRoot = $PSScriptRoot
 $script:UpdateRepoId = 'jpolvora/cursor-profile-manager'
 $script:UpdateBranch = 'master'
@@ -186,6 +187,7 @@ $UiStartLabel = "Start $([char]0x25B6)"
 
 $script:UiFont = New-Object System.Drawing.Font 'Segoe UI', 9
 $script:UiFontSemibold = New-Object System.Drawing.Font 'Segoe UI', 9, ([System.Drawing.FontStyle]::Bold)
+$script:UiGridActionFont = New-Object System.Drawing.Font 'Segoe UI', 8
 $script:UiThemePreference = 'default'
 $script:UiEffectiveTheme = 'light'
 $script:UiBackColor = [System.Drawing.Color]::White
@@ -395,7 +397,7 @@ function Apply-DataGridTheme {
     $TargetGrid.ColumnHeadersBorderStyle = [System.Windows.Forms.DataGridViewHeaderBorderStyle]::None
     $TargetGrid.ColumnHeadersHeight = 32
     $TargetGrid.ColumnHeadersHeightSizeMode = [System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode]::DisableResizing
-    $TargetGrid.RowTemplate.Height = 30
+    $TargetGrid.RowTemplate.Height = 28
     $TargetGrid.AlternatingRowsDefaultCellStyle.BackColor = $script:UiGridAltRow
     $TargetGrid.DefaultCellStyle.BackColor = $script:UiPanelColor
     $TargetGrid.DefaultCellStyle.ForeColor = $script:UiTextPrimary
@@ -407,6 +409,56 @@ function Apply-DataGridTheme {
     $TargetGrid.ColumnHeadersDefaultCellStyle.Font = $script:UiFontSemibold
     $TargetGrid.ColumnHeadersDefaultCellStyle.Alignment = [System.Windows.Forms.DataGridViewContentAlignment]::MiddleLeft
     $TargetGrid.ColumnHeadersDefaultCellStyle.Padding = New-Object System.Windows.Forms.Padding(6, 0, 4, 0)
+}
+
+function New-GridActionButtonColumn {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [AllowEmptyString()]
+        [string]$HeaderText = '',
+        [Parameter(Mandatory)][string]$ButtonText,
+        [int]$Width = 52
+    )
+
+    $col = New-Object System.Windows.Forms.DataGridViewButtonColumn
+    $col.Name = $Name
+    $col.HeaderText = $HeaderText
+    $col.Text = $ButtonText
+    $col.UseColumnTextForButtonValue = $true
+    $col.Width = $Width
+    $col.MinimumWidth = $Width
+    $col.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
+    $col.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $col.SortMode = [System.Windows.Forms.DataGridViewColumnSortMode]::NotSortable
+    $col.DefaultCellStyle.Font = $script:UiGridActionFont
+    $col.DefaultCellStyle.Padding = New-Object System.Windows.Forms.Padding 1, 0, 1, 0
+    $col.DefaultCellStyle.Alignment = [System.Windows.Forms.DataGridViewContentAlignment]::MiddleCenter
+    return $col
+}
+
+function Apply-GridActionColumnTheme {
+    param([System.Windows.Forms.DataGridView]$TargetGrid)
+
+    foreach ($actionName in @('ActFocus', 'ActClose', 'ActFolder', 'ActEdit', 'ActDelete')) {
+        if (-not $TargetGrid.Columns.Contains($actionName)) { continue }
+        $col = $TargetGrid.Columns[$actionName]
+        $col.DefaultCellStyle.BackColor = $script:UiPanelColor
+        $col.DefaultCellStyle.ForeColor = $script:UiTextPrimary
+        $col.DefaultCellStyle.SelectionBackColor = $script:UiPanelColor
+        $col.DefaultCellStyle.SelectionForeColor = $script:UiTextPrimary
+        $col.DefaultCellStyle.Font = $script:UiGridActionFont
+    }
+}
+
+function Add-GridActionColumns {
+    param([System.Windows.Forms.DataGridView]$TargetGrid)
+
+    [void]$TargetGrid.Columns.Add((New-GridActionButtonColumn -Name 'ActFocus' -HeaderText 'Actions' -ButtonText 'Focus' -Width 46))
+    [void]$TargetGrid.Columns.Add((New-GridActionButtonColumn -Name 'ActClose' -HeaderText '' -ButtonText 'Close' -Width 46))
+    [void]$TargetGrid.Columns.Add((New-GridActionButtonColumn -Name 'ActFolder' -HeaderText '' -ButtonText 'Folder' -Width 48))
+    [void]$TargetGrid.Columns.Add((New-GridActionButtonColumn -Name 'ActEdit' -HeaderText '' -ButtonText 'Edit' -Width 40))
+    [void]$TargetGrid.Columns.Add((New-GridActionButtonColumn -Name 'ActDelete' -HeaderText '' -ButtonText 'Del' -Width 40))
+    Apply-GridActionColumnTheme -TargetGrid $TargetGrid
 }
 
 # ---------------------------------------------------------------------------
@@ -561,9 +613,6 @@ function Apply-ToolbarTheme {
     if ($script:ToolbarRowSep) {
         $script:ToolbarRowSep.BackColor = $script:UiBorderColor
     }
-    if ($script:ProfileToolbarSeparator) {
-        $script:ProfileToolbarSeparator.BackColor = $script:UiBorderColor
-    }
     if ($script:LblProfilesSection) {
         $script:LblProfilesSection.ForeColor = $script:UiTextMuted
         $script:LblProfilesSection.BackColor = $script:UiPanelColor
@@ -575,14 +624,11 @@ function Apply-ToolbarTheme {
     if ($script:ProfileFlow) {
         $script:ProfileFlow.BackColor = $script:UiPanelColor
     }
+    if ($script:StartHost) {
+        $script:StartHost.BackColor = $script:UiPanelColor
+    }
     if ($script:ThemeFlow) {
         $script:ThemeFlow.BackColor = $script:UiPanelColor
-    }
-    if ($script:ActionsHost) {
-        $script:ActionsHost.BackColor = $script:UiPanelColor
-    }
-    if ($script:ActionsFlow) {
-        $script:ActionsFlow.BackColor = $script:UiPanelColor
     }
     if ($script:LaunchTable) {
         $script:LaunchTable.BackColor = $script:UiPanelColor
@@ -593,18 +639,11 @@ function Apply-ToolbarTheme {
 
     if ($btnAdd) {
         Update-ToolbarButtonTheme -Button $btnAdd
-        Update-ToolbarButtonTheme -Button $btnEdit
-        Update-ToolbarButtonTheme -Button $btnDelete
         Update-ToolbarButtonTheme -Button $btnRefresh
-        Update-ToolbarButtonTheme -Button $btnFolder
     }
-    if ($btnCloseAll) {
-        Update-ToolbarButtonTheme -Button $btnCloseAll
+    if ($btnStart) {
+        Update-ToolbarButtonTheme -Button $btnStart -Primary
     }
-    if ($btnFocus) {
-        Update-ToolbarButtonTheme -Button $btnFocus
-    }
-    Update-ToolbarButtonTheme -Button $btnStart -Primary
 
     if ($script:ThemeLabel) {
         $script:ThemeLabel.ForeColor = $script:UiTextMuted
@@ -633,6 +672,7 @@ function Apply-UiThemeToMainWindow {
 
         $gridHost.BackColor = $script:UiPanelColor
         Apply-DataGridTheme -TargetGrid $grid
+        Apply-GridActionColumnTheme -TargetGrid $grid
 
         Apply-ToolbarTheme
 
@@ -1215,20 +1255,86 @@ function Invoke-CloseAllCursorProfileInstances {
     return $true
 }
 
-function Sync-RunningProfileButtonState {
-    $enabled = $false
-    $selected = Get-SelectedProfile
-    if ($selected) {
-        $instanceCounts = Get-UserDataDirInstanceCounts
-        $runningCount = Get-ProfileInstanceCount -UserDataDir $selected.UserDataDir -InstanceCounts $instanceCounts
-        $enabled = ($runningCount -gt 0)
+function Edit-Profile {
+    param([Parameter(Mandatory)][PSCustomObject]$Profile)
+
+    $result = Show-ProfileDialog -Existing $Profile
+    if ($result) {
+        $Profile.Name = $result.Name
+        $Profile.UserDataDir = $result.UserDataDir
+        $Profile.ProjectPath = $result.ProjectPath
+        $Profile.Notes = $result.Notes
+        Save-Profiles -Profiles $script:Profiles
+        Update-ProfileGrid
+        return $true
+    }
+    return $false
+}
+
+function Remove-Profile {
+    param([Parameter(Mandatory)][PSCustomObject]$Profile)
+
+    $instanceCounts = Get-UserDataDirInstanceCounts
+    $instanceCount = Get-ProfileInstanceCount -UserDataDir $Profile.UserDataDir -InstanceCounts $instanceCounts
+    if ($instanceCount -gt 0) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Close all running Cursor windows for '$($Profile.Name)' ($instanceCount instance$(if ($instanceCount -ne 1) { 's' })) before deleting it. Use Close in the Actions column.",
+            'Profile is running',
+            'OK',
+            'Warning') | Out-Null
+        return $false
     }
 
-    if ($btnFocus) {
-        $btnFocus.Enabled = $enabled
+    $confirm = [System.Windows.Forms.MessageBox]::Show(
+        "Delete profile '$($Profile.Name)'?",
+        'Confirm delete',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question)
+    if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return $false }
+
+    $deleteFolder = [System.Windows.Forms.MessageBox]::Show(
+        "Also delete the profile's data folder?`n$($Profile.UserDataDir)`n`nThis permanently removes its login, extensions and settings.",
+        'Delete data folder',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Warning)
+
+    if ($deleteFolder -eq [System.Windows.Forms.DialogResult]::Yes -and (Test-Path $Profile.UserDataDir)) {
+        try {
+            Remove-Item -Path $Profile.UserDataDir -Recurse -Force
+        }
+        catch {
+            [System.Windows.Forms.MessageBox]::Show("Failed to delete folder: $($_.Exception.Message)", 'Error', 'OK', 'Error') | Out-Null
+        }
     }
-    if ($btnCloseAll) {
-        $btnCloseAll.Enabled = $enabled
+
+    $script:Profiles = @($script:Profiles | Where-Object { $_.Id -ne $Profile.Id })
+    Save-Profiles -Profiles $script:Profiles
+    Update-ProfileGrid
+    return $true
+}
+
+function Invoke-GridProfileAction {
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$Profile,
+        [Parameter(Mandatory)][string]$ActionName
+    )
+
+    switch ($ActionName) {
+        'ActFocus' {
+            [void](Invoke-FocusCursorProfile -Profile $Profile)
+        }
+        'ActClose' {
+            [void](Invoke-CloseAllCursorProfileInstances -Profile $Profile)
+        }
+        'ActFolder' {
+            [void](Open-ProfileUserDataDir -Profile $Profile)
+        }
+        'ActEdit' {
+            [void](Edit-Profile -Profile $Profile)
+        }
+        'ActDelete' {
+            [void](Remove-Profile -Profile $Profile)
+        }
     }
 }
 
@@ -1547,9 +1653,9 @@ $script:Profiles = Load-Profiles
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = $AppWindowTitle
-$form.Size = New-Object System.Drawing.Size(860, 520)
+$form.Size = New-Object System.Drawing.Size(980, 520)
 $form.StartPosition = 'CenterScreen'
-$form.MinimumSize = New-Object System.Drawing.Size(720, 420)
+$form.MinimumSize = New-Object System.Drawing.Size(900, 420)
 $form.Font = $script:UiFont
 $form.BackColor = $script:UiBackColor
 [void](Set-FormIcon -TargetForm $form)
@@ -1601,9 +1707,9 @@ $statusPanel.Controls.Add($lblStatus)
 
 $toolbarPanel = New-Object System.Windows.Forms.Panel
 $toolbarPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
-$toolbarPanel.Height = 96
+$toolbarPanel.Height = 102
 $toolbarPanel.BackColor = $script:UiPanelColor
-$toolbarPanel.Padding = New-Object System.Windows.Forms.Padding(14, 8, 14, 10)
+$toolbarPanel.Padding = New-Object System.Windows.Forms.Padding(14, 8, 14, 8)
 
 $script:ToolbarTable = New-Object System.Windows.Forms.TableLayoutPanel
 $script:ToolbarTable.Dock = [System.Windows.Forms.DockStyle]::Fill
@@ -1611,19 +1717,20 @@ $script:ToolbarTable.RowCount = 3
 $script:ToolbarTable.ColumnCount = 1
 $script:ToolbarTable.Margin = New-Object System.Windows.Forms.Padding 0
 $script:ToolbarTable.Padding = New-Object System.Windows.Forms.Padding 0
-[void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 36)))
+[void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 38)))
 [void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 1)))
-[void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 36)))
+[void]$script:ToolbarTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 38)))
 [void]$script:ToolbarTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
 
 $script:ProfileTable = New-Object System.Windows.Forms.TableLayoutPanel
 $script:ProfileTable.Dock = [System.Windows.Forms.DockStyle]::Fill
 $script:ProfileTable.RowCount = 1
-$script:ProfileTable.ColumnCount = 2
+$script:ProfileTable.ColumnCount = 3
 $script:ProfileTable.Margin = New-Object System.Windows.Forms.Padding 0
 $script:ProfileTable.Padding = New-Object System.Windows.Forms.Padding 0
 [void]$script:ProfileTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 58)))
 [void]$script:ProfileTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+[void]$script:ProfileTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 112)))
 
 $script:LblProfilesSection = New-ToolbarSectionLabel -Text 'Profiles'
 $script:ProfileFlow = New-Object System.Windows.Forms.FlowLayoutPanel
@@ -1631,68 +1738,52 @@ $script:ProfileFlow.Dock = [System.Windows.Forms.DockStyle]::Fill
 $script:ProfileFlow.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
 $script:ProfileFlow.WrapContents = $false
 $script:ProfileFlow.Margin = New-Object System.Windows.Forms.Padding 0
-$script:ProfileFlow.Padding = New-Object System.Windows.Forms.Padding 0
+$script:ProfileFlow.Padding = New-Object System.Windows.Forms.Padding 0, 4, 0, 0
 $script:ProfileFlow.AutoSize = $false
+
+$script:StartHost = New-Object System.Windows.Forms.Panel
+$script:StartHost.Dock = [System.Windows.Forms.DockStyle]::Fill
+$script:StartHost.Margin = New-Object System.Windows.Forms.Padding 0
+$script:StartHost.Padding = New-Object System.Windows.Forms.Padding 0
 
 $script:ProfileTable.Controls.Add($script:LblProfilesSection, 0, 0)
 $script:ProfileTable.Controls.Add($script:ProfileFlow, 1, 0)
+$script:ProfileTable.Controls.Add($script:StartHost, 2, 0)
 $script:ToolbarTable.Controls.Add($script:ProfileTable, 0, 0)
 
 $script:ToolbarRowSep = New-Object System.Windows.Forms.Panel
 $script:ToolbarRowSep.Dock = [System.Windows.Forms.DockStyle]::Fill
-$script:ToolbarRowSep.Margin = New-Object System.Windows.Forms.Padding 0, 2, 0, 2
+$script:ToolbarRowSep.Margin = New-Object System.Windows.Forms.Padding 0, 3, 0, 3
 $script:ToolbarRowSep.BackColor = $script:UiBorderColor
 $script:ToolbarTable.Controls.Add($script:ToolbarRowSep, 0, 1)
 
 $script:LaunchTable = New-Object System.Windows.Forms.TableLayoutPanel
 $script:LaunchTable.Dock = [System.Windows.Forms.DockStyle]::Fill
 $script:LaunchTable.RowCount = 1
-$script:LaunchTable.ColumnCount = 3
+$script:LaunchTable.ColumnCount = 2
 $script:LaunchTable.Margin = New-Object System.Windows.Forms.Padding 0
 $script:LaunchTable.Padding = New-Object System.Windows.Forms.Padding 0
-[void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
+[void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 188)))
 [void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-[void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
 
 $script:ThemeFlow = New-Object System.Windows.Forms.FlowLayoutPanel
-$script:ThemeFlow.AutoSize = $true
-$script:ThemeFlow.Anchor = [System.Windows.Forms.AnchorStyles]::Left
+$script:ThemeFlow.Dock = [System.Windows.Forms.DockStyle]::Fill
 $script:ThemeFlow.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
 $script:ThemeFlow.WrapContents = $false
 $script:ThemeFlow.Margin = New-Object System.Windows.Forms.Padding 0
-$script:ThemeFlow.Padding = New-Object System.Windows.Forms.Padding 0
+$script:ThemeFlow.Padding = New-Object System.Windows.Forms.Padding 0, 4, 0, 0
 
 $script:LblLaunchHint = New-Object System.Windows.Forms.Label
-$script:LblLaunchHint.Text = 'Double-click a profile to start  |  Focus switches to a running window'
+$script:LblLaunchHint.Text = 'Double-click a row to start  |  Per-row Actions: Focus, Close, Folder, Edit, Delete'
 $script:LblLaunchHint.Dock = [System.Windows.Forms.DockStyle]::Fill
 $script:LblLaunchHint.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
 $script:LblLaunchHint.ForeColor = $script:UiTextMuted
 $script:LblLaunchHint.BackColor = $script:UiPanelColor
-$script:LblLaunchHint.Margin = New-Object System.Windows.Forms.Padding 12, 0, 12, 0
+$script:LblLaunchHint.Margin = New-Object System.Windows.Forms.Padding 8, 0, 8, 0
 $script:LblLaunchHint.AutoEllipsis = $true
 
-$script:ActionsHost = New-Object System.Windows.Forms.Panel
-$script:ActionsHost.Dock = [System.Windows.Forms.DockStyle]::Fill
-$script:ActionsHost.Margin = New-Object System.Windows.Forms.Padding 0
-$script:ActionsHost.Padding = New-Object System.Windows.Forms.Padding 0
-
-$script:ActionsFlow = New-Object System.Windows.Forms.FlowLayoutPanel
-$script:ActionsFlow.AutoSize = $true
-$script:ActionsFlow.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
-$script:ActionsFlow.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
-$script:ActionsFlow.WrapContents = $false
-$script:ActionsFlow.Margin = New-Object System.Windows.Forms.Padding 0
-$script:ActionsFlow.Padding = New-Object System.Windows.Forms.Padding 0
-
-$script:ActionsHost.Controls.Add($script:ActionsFlow)
-$script:ActionsHost.Add_Resize({
-    if (-not $script:ActionsFlow) { return }
-    $x = [Math]::Max(0, $script:ActionsHost.ClientSize.Width - $script:ActionsFlow.Width)
-    $script:ActionsFlow.Location = New-Object System.Drawing.Point($x, 0)
-})
 $script:LaunchTable.Controls.Add($script:ThemeFlow, 0, 0)
 $script:LaunchTable.Controls.Add($script:LblLaunchHint, 1, 0)
-$script:LaunchTable.Controls.Add($script:ActionsHost, 2, 0)
 $script:ToolbarTable.Controls.Add($script:LaunchTable, 0, 2)
 $toolbarPanel.Controls.Add($script:ToolbarTable)
 
@@ -1715,23 +1806,31 @@ $grid = New-Object System.Windows.Forms.DataGridView
 $grid.Dock = [System.Windows.Forms.DockStyle]::Fill
 $grid.AllowUserToAddRows = $false
 $grid.AllowUserToDeleteRows = $false
-$grid.ReadOnly = $true
 $grid.SelectionMode = 'FullRowSelect'
 $grid.MultiSelect = $false
 $grid.AutoSizeColumnsMode = 'Fill'
 $grid.RowHeadersVisible = $false
+$grid.EditMode = [System.Windows.Forms.DataGridViewEditMode]::EditProgrammatically
 
 [void]$grid.Columns.Add('Name', 'Name')
 [void]$grid.Columns.Add('UserDataDir', 'User Data Dir')
 [void]$grid.Columns.Add('Instances', 'Instances')
 [void]$grid.Columns.Add('Status', 'Status')
 [void]$grid.Columns.Add('Notes', 'Notes')
-$grid.Columns['Name'].FillWeight = 100
-$grid.Columns['UserDataDir'].FillWeight = 220
-$grid.Columns['Instances'].FillWeight = 50
+Add-GridActionColumns -TargetGrid $grid
+
+$grid.Columns['Name'].ReadOnly = $true
+$grid.Columns['UserDataDir'].ReadOnly = $true
+$grid.Columns['Instances'].ReadOnly = $true
+$grid.Columns['Status'].ReadOnly = $true
+$grid.Columns['Notes'].ReadOnly = $true
+
+$grid.Columns['Name'].FillWeight = 90
+$grid.Columns['UserDataDir'].FillWeight = 180
+$grid.Columns['Instances'].FillWeight = 45
 $grid.Columns['Instances'].DefaultCellStyle.Alignment = [System.Windows.Forms.DataGridViewContentAlignment]::MiddleCenter
-$grid.Columns['Status'].FillWeight = 60
-$grid.Columns['Notes'].FillWeight = 150
+$grid.Columns['Status'].FillWeight = 55
+$grid.Columns['Notes'].FillWeight = 100
 
 # Reduce paint flicker during frequent status updates.
 $grid.GetType().GetProperty('DoubleBuffered', [System.Reflection.BindingFlags]'Instance, NonPublic').SetValue($grid, $true, $null)
@@ -1845,6 +1944,32 @@ function Sync-GridRowToView {
     if ($cells['Instances'].Style.ForeColor -ne $foreColor) {
         $cells['Instances'].Style.ForeColor = $foreColor
     }
+
+    foreach ($actionName in @('ActFocus', 'ActClose', 'ActFolder', 'ActEdit', 'ActDelete')) {
+        if (-not $grid.Columns.Contains($actionName)) { continue }
+        $actionCell = $cells[$actionName]
+        $rowBack = if ($Row.Index % 2 -eq 1) { $script:UiGridAltRow } else { $script:UiPanelColor }
+        if ($actionCell.Style.BackColor -ne $rowBack) {
+            $actionCell.Style.BackColor = $rowBack
+        }
+        if ($actionCell.Style.SelectionBackColor -ne $rowBack) {
+            $actionCell.Style.SelectionBackColor = $rowBack
+        }
+    }
+
+    foreach ($actionName in @('ActFocus', 'ActClose')) {
+        if (-not $grid.Columns.Contains($actionName)) { continue }
+        $actionCell = $cells[$actionName]
+        $actionEnabled = $ModelRow.IsRunning
+        $wantReadOnly = -not $actionEnabled
+        if ($actionCell.ReadOnly -ne $wantReadOnly) {
+            $actionCell.ReadOnly = $wantReadOnly
+        }
+        $actionFore = if ($actionEnabled) { $script:UiTextPrimary } else { $script:UiIdleColor }
+        if ($actionCell.Style.ForeColor -ne $actionFore) {
+            $actionCell.Style.ForeColor = $actionFore
+        }
+    }
 }
 
 function Apply-GridModelToView {
@@ -1871,7 +1996,8 @@ function Apply-GridModelToView {
                 [void]$existingRows.Remove($id)
             }
             else {
-                $rowIdx = $grid.Rows.Add('', '', '', '', '', '')
+                $emptyCells = @(1..(5 + $script:GridActionColumnCount) | ForEach-Object { '' })
+                $rowIdx = $grid.Rows.Add($emptyCells)
                 $row = $grid.Rows[$rowIdx]
                 $row.Tag = $id
             }
@@ -1900,7 +2026,6 @@ function Update-ProfileGrid {
 
     Apply-GridModelToView -Model $newModel -PreviousModel $previousModel
     $script:GridModel = $newModel
-    Sync-RunningProfileButtonState
 }
 
 function Request-DeferredGridRefresh {
@@ -1964,19 +2089,8 @@ function Open-ProfileUserDataDir {
 }
 
 $btnAdd = New-ToolbarButton -Text 'Add'
-$btnEdit = New-ToolbarButton -Text 'Edit'
-$btnDelete = New-ToolbarButton -Text 'Delete'
-$script:ProfileToolbarSeparator = New-ToolbarFlowSeparator
 $btnRefresh = New-ToolbarButton -Text 'Refresh'
-$btnFolder = New-ToolbarButton -Text 'Folder'
-$script:ProfileFlow.Controls.AddRange(@(
-    $btnAdd,
-    $btnEdit,
-    $btnDelete,
-    $script:ProfileToolbarSeparator,
-    $btnRefresh,
-    $btnFolder
-))
+$script:ProfileFlow.Controls.AddRange(@($btnAdd, $btnRefresh))
 
 $script:ThemeLabel = New-Object System.Windows.Forms.Label
 $script:ThemeLabel.Text = 'Theme:'
@@ -2002,12 +2116,15 @@ $script:ThemeCombo.Add_SelectedIndexChanged({
 })
 $script:ThemeFlow.Controls.AddRange(@($script:ThemeLabel, $script:ThemeCombo))
 
-$btnCloseAll = New-ToolbarButton -Text 'Close all' -Width 92
-$btnCloseAll.Enabled = $false
-$btnFocus = New-ToolbarButton -Text 'Focus'
-$btnFocus.Enabled = $false
-$btnStart = New-ToolbarButton -Text $UiStartLabel -Primary
-$script:ActionsFlow.Controls.AddRange(@($btnCloseAll, $btnFocus, $btnStart))
+$btnStart = New-ToolbarButton -Text $UiStartLabel -Primary -Width 108
+$btnStart.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+$btnStart.Margin = New-Object System.Windows.Forms.Padding 0, 4, 0, 0
+$script:StartHost.Controls.Add($btnStart)
+$script:StartHost.Add_Resize({
+    if (-not $btnStart) { return }
+    $x = [Math]::Max(0, $script:StartHost.ClientSize.Width - $btnStart.Width)
+    $btnStart.Location = New-Object System.Drawing.Point($x, 4)
+})
 
 Apply-ToolbarTheme
 
@@ -2025,68 +2142,6 @@ $btnAdd.Add_Click({
     }
 })
 
-$btnEdit.Add_Click({
-    $selected = Get-SelectedProfile
-    if (-not $selected) {
-        [System.Windows.Forms.MessageBox]::Show('Select a profile to edit.', 'No selection', 'OK', 'Information') | Out-Null
-        return
-    }
-    $result = Show-ProfileDialog -Existing $selected
-    if ($result) {
-        $selected.Name = $result.Name
-        $selected.UserDataDir = $result.UserDataDir
-        $selected.ProjectPath = $result.ProjectPath
-        $selected.Notes = $result.Notes
-        Save-Profiles -Profiles $script:Profiles
-        Update-ProfileGrid
-    }
-})
-
-$btnDelete.Add_Click({
-    $selected = Get-SelectedProfile
-    if (-not $selected) {
-        [System.Windows.Forms.MessageBox]::Show('Select a profile to delete.', 'No selection', 'OK', 'Information') | Out-Null
-        return
-    }
-
-    $instanceCounts = Get-UserDataDirInstanceCounts
-    $instanceCount = Get-ProfileInstanceCount -UserDataDir $selected.UserDataDir -InstanceCounts $instanceCounts
-    if ($instanceCount -gt 0) {
-        [System.Windows.Forms.MessageBox]::Show(
-            "Close all running Cursor windows for '$($selected.Name)' ($instanceCount instance$(if ($instanceCount -ne 1) { 's' })) before deleting it, or use Close all in the toolbar.",
-            'Profile is running',
-            'OK',
-            'Warning') | Out-Null
-        return
-    }
-
-    $confirm = [System.Windows.Forms.MessageBox]::Show(
-        "Delete profile '$($selected.Name)'?",
-        'Confirm delete',
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Question)
-    if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
-
-    $deleteFolder = [System.Windows.Forms.MessageBox]::Show(
-        "Also delete the profile's data folder?`n$($selected.UserDataDir)`n`nThis permanently removes its login, extensions and settings.",
-        'Delete data folder',
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Warning)
-
-    if ($deleteFolder -eq [System.Windows.Forms.DialogResult]::Yes -and (Test-Path $selected.UserDataDir)) {
-        try {
-            Remove-Item -Path $selected.UserDataDir -Recurse -Force
-        }
-        catch {
-            [System.Windows.Forms.MessageBox]::Show("Failed to delete folder: $($_.Exception.Message)", 'Error', 'OK', 'Error') | Out-Null
-        }
-    }
-
-    $script:Profiles = @($script:Profiles | Where-Object { $_.Id -ne $selected.Id })
-    Save-Profiles -Profiles $script:Profiles
-    Update-ProfileGrid
-})
-
 $btnStart.Add_Click({
     $selected = Get-SelectedProfile
     if (-not $selected) {
@@ -2099,40 +2154,24 @@ $btnStart.Add_Click({
 
 $btnRefresh.Add_Click({ Update-ProfileGrid })
 
-$btnFolder.Add_Click({
-    $selected = Get-SelectedProfile
-    if (-not $selected) {
-        [System.Windows.Forms.MessageBox]::Show('Select a profile to open its user-data-dir folder.', 'No selection', 'OK', 'Information') | Out-Null
-        return
-    }
-    [void](Open-ProfileUserDataDir -Profile $selected)
-})
+$grid.Add_CellContentClick({
+    param($sender, $e)
+    if ($e.RowIndex -lt 0) { return }
 
-$btnFocus.Add_Click({
-    $selected = Get-SelectedProfile
-    if (-not $selected) {
-        [System.Windows.Forms.MessageBox]::Show('Select a running profile to focus.', 'No selection', 'OK', 'Information') | Out-Null
-        return
-    }
-    [void](Invoke-FocusCursorProfile -Profile $selected)
-})
+    $column = $grid.Columns[$e.ColumnIndex]
+    if ($column -isnot [System.Windows.Forms.DataGridViewButtonColumn]) { return }
 
-$btnCloseAll.Add_Click({
-    $selected = Get-SelectedProfile
-    if (-not $selected) {
-        [System.Windows.Forms.MessageBox]::Show('Select a running profile to close.', 'No selection', 'OK', 'Information') | Out-Null
-        return
-    }
-    [void](Invoke-CloseAllCursorProfileInstances -Profile $selected)
-})
+    $profile = Get-ProfileFromGridRow -RowIndex $e.RowIndex
+    if (-not $profile) { return }
 
-$grid.Add_SelectionChanged({ Sync-RunningProfileButtonState })
+    Invoke-GridProfileAction -Profile $profile -ActionName $column.Name
+})
 
 $grid.Add_CellDoubleClick({
     param($s, $e)
-    if ($e.RowIndex -ge 0) {
-        [void](Start-ProfileFromGridRow -RowIndex $e.RowIndex)
-    }
+    if ($e.RowIndex -lt 0) { return }
+    if ($grid.Columns[$e.ColumnIndex] -is [System.Windows.Forms.DataGridViewButtonColumn]) { return }
+    [void](Start-ProfileFromGridRow -RowIndex $e.RowIndex)
 })
 
 $processEventDebounce = New-Object System.Windows.Forms.Timer
@@ -2162,13 +2201,6 @@ $form.Add_FormClosing({
 })
 
 Update-ProfileGrid
-
-$form.Add_Load({
-    if ($script:ActionsHost -and $script:ActionsFlow) {
-        $x = [Math]::Max(0, $script:ActionsHost.ClientSize.Width - $script:ActionsFlow.Width)
-        $script:ActionsFlow.Location = New-Object System.Drawing.Point($x, 0)
-    }
-})
 
 try {
     [void]$form.ShowDialog()
