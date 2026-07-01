@@ -8,7 +8,14 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ### Added
 
+- **Check for updates** — footer link compares `App-Version` markers against GitHub `master`, downloads newer scripts, overwrites the launch folder in place, then restarts (shortcuts unchanged).
+- **Folder button** — opens the selected profile's user-data-dir in File Explorer (creates the folder if it does not exist yet).
 - **GUI themes** — light and dark palettes plus **System default** (follows Windows app light/dark via `AppsUseLightTheme`); toolbar **Theme** dropdown; preference saved to `settings.json`.
+
+### Changed
+
+- **Check for updates** — uses `# App-Version` / `$script:AppVersionId` (missing marker = outdated; update when GitHub is greater; force reinstall with confirmation when not newer).
+- **Grid columns** — order is now Name, User Data Dir, Instances, Status, Notes; Project column removed from the grid (still editable in Add/Edit).
 
 ### Removed
 

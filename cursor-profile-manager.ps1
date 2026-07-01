@@ -16,8 +16,18 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
+# App-Version: 1.2.0
 $AppWindowTitle = 'Cursor Profile Manager'
 $SingleInstanceMutexName = 'Local\CursorProfileManager_GUI_v1'
+$script:AppVersionId = '1.2.0'
+$script:InstallRoot = $PSScriptRoot
+$script:UpdateRepoId = 'jpolvora/cursor-profile-manager'
+$script:UpdateBranch = 'master'
+$script:UpdateManagedFiles = @(
+    'cursor-profile-manager.ps1',
+    'cursor-profile-manager.bat',
+    'install-desktop-shortcut.ps1'
+)
 
 function Show-ExistingAppWindow {
     param([Parameter(Mandatory)][string]$WindowTitle)
@@ -489,6 +499,7 @@ function Apply-UiThemeToMainWindow {
         Update-ToolbarButtonTheme -Button $btnEdit
         Update-ToolbarButtonTheme -Button $btnDelete
         Update-ToolbarButtonTheme -Button $btnRefresh
+        Update-ToolbarButtonTheme -Button $btnFolder
         Update-ToolbarButtonTheme -Button $btnStart -Primary
 
         if ($script:ThemeLabel) {
@@ -498,6 +509,12 @@ function Apply-UiThemeToMainWindow {
         if ($script:ThemeCombo) {
             $script:ThemeCombo.BackColor = $script:UiInputBackColor
             $script:ThemeCombo.ForeColor = $script:UiInputForeColor
+        }
+        if ($script:CheckUpdateLink) {
+            $script:CheckUpdateLink.LinkColor = $script:UiAccent
+            $script:CheckUpdateLink.ActiveLinkColor = $script:UiAccentHover
+            $script:CheckUpdateLink.VisitedLinkColor = $script:UiAccent
+            $script:CheckUpdateLink.BackColor = $script:UiPanelColor
         }
 
         Sync-UiThemeComboSelection
@@ -542,6 +559,301 @@ function Test-UiSystemThemeChanged {
 
     $effective = Get-EffectiveUiThemeName -Preference 'default'
     return $effective -ne $script:UiEffectiveTheme
+}
+
+# ---------------------------------------------------------------------------
+# In-app update (GitHub)
+# ---------------------------------------------------------------------------
+
+function Get-AppVersionIdFromScriptContent {
+    param([string]$Content)
+
+    if ([string]::IsNullOrWhiteSpace($Content)) { return $null }
+    if ($Content -match '(?m)^\s*#\s*App-Version:\s*(\S+)') {
+        return $Matches[1].Trim()
+    }
+    if ($Content -match '\$script:AppVersionId\s*=\s*''([^'']+)''') {
+        return $Matches[1].Trim()
+    }
+    return $null
+}
+
+function ConvertTo-AppVersionNumbers {
+    param([string]$VersionId)
+
+    if ([string]::IsNullOrWhiteSpace($VersionId)) { return $null }
+    $parts = $VersionId.Trim().Split('.')
+    $numbers = New-Object 'System.Collections.Generic.List[int]'
+    foreach ($part in $parts) {
+        $segment = $part.Trim()
+        if ($segment -notmatch '^\d+$') {
+            return $null
+        }
+        [void]$numbers.Add([int]$segment)
+    }
+    if ($numbers.Count -eq 0) { return $null }
+    return $numbers.ToArray()
+}
+
+function Compare-AppVersionId {
+    param(
+        [string]$Left,
+        [string]$Right
+    )
+
+    $leftNumbers = ConvertTo-AppVersionNumbers -VersionId $Left
+    $rightNumbers = ConvertTo-AppVersionNumbers -VersionId $Right
+    if ($null -eq $leftNumbers -or $null -eq $rightNumbers) {
+        return $null
+    }
+
+    $maxLength = [Math]::Max($leftNumbers.Length, $rightNumbers.Length)
+    for ($i = 0; $i -lt $maxLength; $i++) {
+        $leftValue = if ($i -lt $leftNumbers.Length) { $leftNumbers[$i] } else { 0 }
+        $rightValue = if ($i -lt $rightNumbers.Length) { $rightNumbers[$i] } else { 0 }
+        if ($leftValue -lt $rightValue) { return -1 }
+        if ($leftValue -gt $rightValue) { return 1 }
+    }
+    return 0
+}
+
+function Get-AppVersionUpdateStatus {
+    param(
+        [string]$LocalVersion,
+        [string]$RemoteVersion
+    )
+
+    $localMissing = [string]::IsNullOrWhiteSpace($LocalVersion)
+    $remoteMissing = [string]::IsNullOrWhiteSpace($RemoteVersion)
+    $localDisplay = if ($localMissing) { '(none)' } else { $LocalVersion }
+    $remoteDisplay = if ($remoteMissing) { '(none)' } else { $RemoteVersion }
+
+    if ($localMissing -or $remoteMissing) {
+        $reason = if ($localMissing -and $remoteMissing) {
+            'No App-Version marker was found locally or on GitHub. The install is treated as outdated.'
+        }
+        elseif ($localMissing) {
+            'No App-Version marker was found in your local copy. The install is treated as outdated.'
+        }
+        else {
+            'No App-Version marker was found on GitHub. The install is treated as outdated.'
+        }
+        return [PSCustomObject]@{
+            NeedsUpdate    = $true
+            CanForceUpdate = $false
+            LocalVersion   = $localDisplay
+            RemoteVersion  = $remoteDisplay
+            Reason         = $reason
+        }
+    }
+
+    $comparison = Compare-AppVersionId -Left $LocalVersion -Right $RemoteVersion
+    if ($null -eq $comparison) {
+        return [PSCustomObject]@{
+            NeedsUpdate    = $true
+            CanForceUpdate = $false
+            LocalVersion   = $localDisplay
+            RemoteVersion  = $remoteDisplay
+            Reason         = 'Version markers exist but could not be compared. The install is treated as outdated.'
+        }
+    }
+
+    if ($comparison -lt 0) {
+        return [PSCustomObject]@{
+            NeedsUpdate    = $true
+            CanForceUpdate = $false
+            LocalVersion   = $localDisplay
+            RemoteVersion  = $remoteDisplay
+            Reason         = "A newer release is available ($RemoteVersion > $LocalVersion)."
+        }
+    }
+
+    if ($comparison -eq 0) {
+        return [PSCustomObject]@{
+            NeedsUpdate    = $false
+            CanForceUpdate = $true
+            LocalVersion   = $localDisplay
+            RemoteVersion  = $remoteDisplay
+            Reason         = "You already have version $LocalVersion."
+        }
+    }
+
+    return [PSCustomObject]@{
+        NeedsUpdate    = $false
+        CanForceUpdate = $true
+        LocalVersion   = $localDisplay
+        RemoteVersion  = $remoteDisplay
+        Reason         = "Your local copy ($LocalVersion) is newer than GitHub ($RemoteVersion)."
+    }
+}
+
+function Get-RemoteUpdateRawUrl {
+    param([Parameter(Mandatory)][string]$FileName)
+
+    return "https://raw.githubusercontent.com/$($script:UpdateRepoId)/$($script:UpdateBranch)/$FileName"
+}
+
+function Get-RemoteUpdateFileContent {
+    param([Parameter(Mandatory)][string]$FileName)
+
+    $url = Get-RemoteUpdateRawUrl -FileName $FileName
+    $previousProtocol = [Net.ServicePointManager]::SecurityProtocol
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $wc = New-Object System.Net.WebClient
+        $wc.Headers.Add('User-Agent', 'CursorProfileManager-Update')
+        return $wc.DownloadString($url)
+    }
+    finally {
+        [Net.ServicePointManager]::SecurityProtocol = $previousProtocol
+    }
+}
+
+function Get-RemoteManagedUpdateFiles {
+    param([string]$MainScriptContent)
+
+    $remoteFiles = @{}
+    foreach ($fileName in $script:UpdateManagedFiles) {
+        if ($fileName -eq 'cursor-profile-manager.ps1' -and -not [string]::IsNullOrWhiteSpace($MainScriptContent)) {
+            $remoteFiles[$fileName] = $MainScriptContent
+            continue
+        }
+        $remoteFiles[$fileName] = Get-RemoteUpdateFileContent -FileName $fileName
+    }
+    return $remoteFiles
+}
+
+function Save-UpdateStagingFiles {
+    param(
+        [Parameter(Mandatory)][hashtable]$FilesByName,
+        [Parameter(Mandatory)][string]$StagingDir
+    )
+
+    if (Test-Path $StagingDir) {
+        Remove-Item -Path $StagingDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $StagingDir -Force | Out-Null
+
+    foreach ($name in $FilesByName.Keys) {
+        $dest = Join-Path $StagingDir $name
+        $content = [string]$FilesByName[$name]
+        if ($name -like '*.bat') {
+            [System.IO.File]::WriteAllText($dest, $content, [System.Text.Encoding]::ASCII)
+        }
+        else {
+            $utf8Bom = New-Object System.Text.UTF8Encoding $true
+            [System.IO.File]::WriteAllText($dest, $content, $utf8Bom)
+        }
+    }
+}
+
+function Start-DeferredAppUpdate {
+    param([Parameter(Mandatory)][string]$StagingDir)
+
+    $updaterPath = Join-Path $script:InstallRoot 'apply-profile-manager-update.ps1'
+    $updaterContent = @'
+#Requires -Version 5.1
+param(
+    [Parameter(Mandatory)][int]$ParentPid,
+    [Parameter(Mandatory)][string]$StagingDir,
+    [Parameter(Mandatory)][string]$InstallDir
+)
+$ErrorActionPreference = 'Stop'
+$files = @(
+    'cursor-profile-manager.ps1',
+    'cursor-profile-manager.bat',
+    'install-desktop-shortcut.ps1'
+)
+while (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {
+    Start-Sleep -Milliseconds 200
+}
+foreach ($name in $files) {
+    $src = Join-Path $StagingDir $name
+    if (Test-Path $src) {
+        Copy-Item -Path $src -Destination (Join-Path $InstallDir $name) -Force
+    }
+}
+Remove-Item -Path $StagingDir -Recurse -Force -ErrorAction SilentlyContinue
+$selfPath = $MyInvocation.MyCommand.Path
+Start-Process -FilePath 'powershell.exe' -ArgumentList @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+    '-File', (Join-Path $InstallDir 'cursor-profile-manager.ps1')
+)
+Start-Sleep -Milliseconds 500
+Remove-Item -Path $selfPath -Force -ErrorAction SilentlyContinue
+'@
+
+    $utf8Bom = New-Object System.Text.UTF8Encoding $true
+    [System.IO.File]::WriteAllText($updaterPath, $updaterContent, $utf8Bom)
+
+    Start-Process -FilePath 'powershell.exe' -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+        '-File', $updaterPath,
+        '-ParentPid', ([string]$PID),
+        '-StagingDir', $StagingDir,
+        '-InstallDir', $script:InstallRoot
+    )
+
+    $form.Close()
+}
+
+function Confirm-AppUpdateApply {
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$UpdateStatus
+    )
+
+    $message = @(
+        $UpdateStatus.Reason
+        ''
+        "Local version:  $($UpdateStatus.LocalVersion)"
+        "GitHub version: $($UpdateStatus.RemoteVersion)"
+        ''
+        'Apply update now? The manager will close and restart. Desktop shortcuts and the .bat launcher keep working because files are overwritten in place.'
+    ) -join [Environment]::NewLine
+
+    $confirm = [System.Windows.Forms.MessageBox]::Show(
+        $message,
+        'Apply update',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question)
+    return ($confirm -eq [System.Windows.Forms.DialogResult]::Yes)
+}
+
+function Invoke-CheckForAppUpdate {
+    if ([string]::IsNullOrWhiteSpace($script:InstallRoot) -or -not (Test-Path $script:InstallRoot)) {
+        throw 'Could not determine the install folder for this copy of the Profile Manager.'
+    }
+
+    $stagingDir = Join-Path $script:InstallRoot '.update-staging'
+    $remoteMainScript = Get-RemoteUpdateFileContent -FileName 'cursor-profile-manager.ps1'
+    $remoteVersion = Get-AppVersionIdFromScriptContent -Content $remoteMainScript
+    $localVersion = $script:AppVersionId
+    $updateStatus = Get-AppVersionUpdateStatus -LocalVersion $localVersion -RemoteVersion $remoteVersion
+
+    if (-not $updateStatus.NeedsUpdate) {
+        $force = [System.Windows.Forms.MessageBox]::Show(
+            @(
+                $updateStatus.Reason
+                ''
+                "Local version:  $($updateStatus.LocalVersion)"
+                "GitHub version: $($updateStatus.RemoteVersion)"
+                ''
+                'Force reinstall from GitHub anyway? This overwrites your local copy even though GitHub is not newer.'
+            ) -join [Environment]::NewLine,
+            'No updates',
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($force -ne [System.Windows.Forms.DialogResult]::Yes) {
+            return
+        }
+    }
+    elseif (-not (Confirm-AppUpdateApply -UpdateStatus $updateStatus)) {
+        return
+    }
+
+    $remoteFiles = Get-RemoteManagedUpdateFiles -MainScriptContent $remoteMainScript
+    Save-UpdateStagingFiles -FilesByName $remoteFiles -StagingDir $stagingDir
+    Start-DeferredAppUpdate -StagingDir $stagingDir
 }
 
 # ---------------------------------------------------------------------------
@@ -959,6 +1271,37 @@ $lblStatus.Text = "Profiles dir: $ProfilesRoot"
 $lblStatus.Dock = [System.Windows.Forms.DockStyle]::Fill
 $lblStatus.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
 $lblStatus.ForeColor = $script:UiTextMuted
+
+$script:CheckUpdateLink = New-Object System.Windows.Forms.LinkLabel
+$script:CheckUpdateLink.Text = 'Check for updates'
+$script:CheckUpdateLink.AutoSize = $true
+$script:CheckUpdateLink.Dock = [System.Windows.Forms.DockStyle]::Right
+$script:CheckUpdateLink.Padding = New-Object System.Windows.Forms.Padding(0, 7, 0, 0)
+$script:CheckUpdateLink.LinkColor = $script:UiAccent
+$script:CheckUpdateLink.ActiveLinkColor = $script:UiAccentHover
+$script:CheckUpdateLink.VisitedLinkColor = $script:UiAccent
+$script:CheckUpdateLink.BackColor = $script:UiPanelColor
+$script:CheckUpdateLink.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+$script:CheckUpdateLink.Add_LinkClicked({
+    $script:CheckUpdateLink.Enabled = $false
+    $form.UseWaitCursor = $true
+    try {
+        Invoke-CheckForAppUpdate
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Could not check for updates:`n$($_.Exception.Message)",
+            'Update check failed',
+            'OK',
+            'Error') | Out-Null
+    }
+    finally {
+        $form.UseWaitCursor = $false
+        $script:CheckUpdateLink.Enabled = $true
+    }
+})
+
+$statusPanel.Controls.Add($script:CheckUpdateLink)
 $statusPanel.Controls.Add($lblStatus)
 
 $toolbarPanel = New-Object System.Windows.Forms.Panel
@@ -999,19 +1342,17 @@ $grid.MultiSelect = $false
 $grid.AutoSizeColumnsMode = 'Fill'
 $grid.RowHeadersVisible = $false
 
-[void]$grid.Columns.Add('Status', 'Status')
-[void]$grid.Columns.Add('Instances', 'Instances')
 [void]$grid.Columns.Add('Name', 'Name')
-[void]$grid.Columns.Add('UserDataDir', 'User data dir')
-[void]$grid.Columns.Add('ProjectPath', 'Project')
+[void]$grid.Columns.Add('UserDataDir', 'User Data Dir')
+[void]$grid.Columns.Add('Instances', 'Instances')
+[void]$grid.Columns.Add('Status', 'Status')
 [void]$grid.Columns.Add('Notes', 'Notes')
-$grid.Columns['Status'].FillWeight = 60
+$grid.Columns['Name'].FillWeight = 100
+$grid.Columns['UserDataDir'].FillWeight = 220
 $grid.Columns['Instances'].FillWeight = 50
 $grid.Columns['Instances'].DefaultCellStyle.Alignment = [System.Windows.Forms.DataGridViewContentAlignment]::MiddleCenter
-$grid.Columns['Name'].FillWeight = 100
-$grid.Columns['UserDataDir'].FillWeight = 200
-$grid.Columns['ProjectPath'].FillWeight = 160
-$grid.Columns['Notes'].FillWeight = 130
+$grid.Columns['Status'].FillWeight = 60
+$grid.Columns['Notes'].FillWeight = 150
 
 # Reduce paint flicker during frequent status updates.
 $grid.GetType().GetProperty('DoubleBuffered', [System.Reflection.BindingFlags]'Instance, NonPublic').SetValue($grid, $true, $null)
@@ -1042,7 +1383,6 @@ function New-GridRowModel {
         Instances   = $InstanceCount
         Name        = $Profile.Name
         UserDataDir = $Profile.UserDataDir
-        ProjectPath = $Profile.ProjectPath
         Notes       = $Profile.Notes
         IsRunning   = $isRunning
     }
@@ -1076,7 +1416,6 @@ function Test-GridRowModelEqual {
         $A.Instances -eq $B.Instances -and
         $A.Name -eq $B.Name -and
         $A.UserDataDir -eq $B.UserDataDir -and
-        $A.ProjectPath -eq $B.ProjectPath -and
         $A.Notes -eq $B.Notes
 }
 
@@ -1106,20 +1445,17 @@ function Sync-GridRowToView {
     $foreColor = if ($ModelRow.IsRunning) { $script:RunningGridForeColor } else { $script:DefaultGridForeColor }
     $cells = $Row.Cells
 
-    if ([string]$cells['Status'].Value -ne $ModelRow.Status) {
-        $cells['Status'].Value = $ModelRow.Status
-    }
-    if ([string]$cells['Instances'].Value -ne [string]$ModelRow.Instances) {
-        $cells['Instances'].Value = [string]$ModelRow.Instances
-    }
     if ([string]$cells['Name'].Value -ne $ModelRow.Name) {
         $cells['Name'].Value = $ModelRow.Name
     }
     if ([string]$cells['UserDataDir'].Value -ne $ModelRow.UserDataDir) {
         $cells['UserDataDir'].Value = $ModelRow.UserDataDir
     }
-    if ([string]$cells['ProjectPath'].Value -ne $ModelRow.ProjectPath) {
-        $cells['ProjectPath'].Value = $ModelRow.ProjectPath
+    if ([string]$cells['Instances'].Value -ne [string]$ModelRow.Instances) {
+        $cells['Instances'].Value = [string]$ModelRow.Instances
+    }
+    if ([string]$cells['Status'].Value -ne $ModelRow.Status) {
+        $cells['Status'].Value = $ModelRow.Status
     }
     if ([string]$cells['Notes'].Value -ne $ModelRow.Notes) {
         $cells['Notes'].Value = $ModelRow.Notes
@@ -1218,6 +1554,36 @@ function Start-ProfileFromGridRow {
     return $true
 }
 
+function Open-ProfileUserDataDir {
+    param([Parameter(Mandatory)][PSCustomObject]$Profile)
+
+    $dir = [string]$Profile.UserDataDir
+    if ([string]::IsNullOrWhiteSpace($dir)) {
+        [System.Windows.Forms.MessageBox]::Show('This profile has no user-data-dir path.', 'No folder', 'OK', 'Information') | Out-Null
+        return $false
+    }
+
+    if (-not (Test-Path $dir)) {
+        try {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+        catch {
+            [System.Windows.Forms.MessageBox]::Show("Could not create folder:`n$dir`n`n$($_.Exception.Message)", 'Error', 'OK', 'Error') | Out-Null
+            return $false
+        }
+    }
+
+    try {
+        Start-Process -FilePath 'explorer.exe' -ArgumentList @($dir)
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show("Could not open folder:`n$dir`n`n$($_.Exception.Message)", 'Error', 'OK', 'Error') | Out-Null
+        return $false
+    }
+
+    return $true
+}
+
 $btnAdd = New-Object System.Windows.Forms.Button
 $btnAdd.Text = 'Add'
 $btnAdd.Size = New-Object System.Drawing.Size(88, 32)
@@ -1245,6 +1611,13 @@ $btnRefresh.Size = New-Object System.Drawing.Size(88, 32)
 $btnRefresh.Location = New-Object System.Drawing.Point(300, 10)
 Set-ButtonFlatStyle -Button $btnRefresh
 $toolbarPanel.Controls.Add($btnRefresh)
+
+$btnFolder = New-Object System.Windows.Forms.Button
+$btnFolder.Text = 'Folder'
+$btnFolder.Size = New-Object System.Drawing.Size(88, 32)
+$btnFolder.Location = New-Object System.Drawing.Point(396, 10)
+Set-ButtonFlatStyle -Button $btnFolder
+$toolbarPanel.Controls.Add($btnFolder)
 
 $btnStart = New-Object System.Windows.Forms.Button
 $btnStart.Text = $UiStartLabel
@@ -1367,6 +1740,15 @@ $btnStart.Add_Click({
 })
 
 $btnRefresh.Add_Click({ Update-ProfileGrid })
+
+$btnFolder.Add_Click({
+    $selected = Get-SelectedProfile
+    if (-not $selected) {
+        [System.Windows.Forms.MessageBox]::Show('Select a profile to open its user-data-dir folder.', 'No selection', 'OK', 'Information') | Out-Null
+        return
+    }
+    [void](Open-ProfileUserDataDir -Profile $selected)
+})
 
 $grid.Add_CellDoubleClick({
     param($s, $e)

@@ -27,6 +27,22 @@ Windows GUI utility to manage and launch **multiple isolated Cursor IDE instance
 
 Override with `CURSOR_PROFILES_DIR`. Override binary with `CURSOR_BIN`.
 
+## App version ID
+
+The main script carries a release marker used by **Check for updates**:
+
+```powershell
+# App-Version: 1.2.0
+$script:AppVersionId = '1.2.0'
+```
+
+Rules:
+
+- Keep **both** the `# App-Version:` comment and `$script:AppVersionId` in sync in `cursor-profile-manager.ps1`.
+- Use dotted numeric segments (`major.minor.patch`, e.g. `1.2.0`). The updater compares segment by segment as integers.
+- **Increment the version** after every improvement session or commit that changes shipped behavior or scripts, so GitHub `master` and local installs can detect newer releases.
+- Update check treats a missing marker (local or remote) as **outdated**. When both markers exist, apply an update only if GitHub’s version is **greater**; equal or older GitHub versions can still be **force reinstalled** with confirmation.
+
 ## Launch contract
 
 On **Start**, the GUI must invoke:
@@ -64,6 +80,7 @@ Key modules inside the script:
 | Single instance | `Initialize-SingleInstance`, `Show-ExistingAppWindow` | Named mutex + Win32 foreground |
 | Storage | `Load-Profiles`, `Save-Profiles`, `New-ProfileObject`, `Load-AppSettings`, `Save-AppSettings` | UTF-8 JSON |
 | UI theme | `Get-UiThemePalettes`, `Test-WindowsAppsUseLightTheme`, `Set-UiThemePalette`, `Set-UiThemePreference`, `Apply-UiThemeToMainWindow` | Light/dark palettes; `default` follows Windows `AppsUseLightTheme` |
+| In-app update | `Invoke-CheckForAppUpdate`, `Get-AppVersionIdFromScriptContent`, `Compare-AppVersionId`, `Start-DeferredAppUpdate` | Raw GitHub `master` files; version compare via `# App-Version` / `$script:AppVersionId`; deferred copy after exit |
 | Process scan | `Get-UserDataDirInstanceCounts`, `Get-ProfileInstanceCount` | CIM `Win32_Process`; count `--type=renderer` per user-data-dir (one window each) |
 | Launch | `Find-CursorExecutable`, `Start-CursorProfileInstance` | |
 | Grid model | `Build-GridModel`, `Test-GridModelEqual`, `Update-ProfileGrid` | View separated from UI |
@@ -77,8 +94,9 @@ Key modules inside the script:
 
 1. Update `cursor-profile-manager.ps1` and `README.md` together.
 2. Update this file if file roles, launch contract, or architecture change.
-3. Do not re-add CLI/bash launchers unless explicitly requested.
-4. Do not commit `profiles.json` or profile data from `~/.cursor-profiles/`.
+3. **Bump the app version** in `cursor-profile-manager.ps1` (see [App version ID](#app-version-id)) on every improvement session or commit that changes shipped scripts.
+4. Do not re-add CLI/bash launchers unless explicitly requested.
+5. Do not commit `profiles.json` or profile data from `~/.cursor-profiles/`.
 
 ## Documentation and changelog (required)
 
@@ -214,4 +232,5 @@ $UiStartLabel = "Start $([char]0x25B6)"        # Start ▶
 3. Does it need periodic UI refresh? → Extend `Build-GridModel` + `Test-GridModelEqual`; do not bypass the model.
 4. New user-visible strings with symbols? → `[char]` code points or ASCII labels.
 5. **Add a `CHANGELOG.md` entry** (Added / Changed / Removed / Fixed).
-6. Run smoke test (see above).
+6. **Bump `$script:AppVersionId` and `# App-Version:`** in `cursor-profile-manager.ps1` when shipped script behavior changes.
+7. Run smoke test (see above).

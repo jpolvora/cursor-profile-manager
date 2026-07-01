@@ -39,14 +39,17 @@ Re-run after moving this folder to repair the shortcut.
 | Feature | Description |
 |---------|-------------|
 | **Profile CRUD** | Add, edit, delete profiles (name, user-data-dir, default project folder, notes) |
+| **Folder** | Opens the selected profile's user-data-dir in File Explorer (creates the folder if missing) |
 | **Start ▶** | Opens another Cursor window for the selected profile (`--new-window`; multiple instances allowed) |
 | **Double-click row** | Same as Start |
 | **Status column** | `● Running` / `○ Idle` from live `Cursor.exe` process inspection |
 | **Instances column** | Count of running windows per profile (0, 1, 2, …) |
+| **Grid columns** | Name, User Data Dir, Instances, Status, Notes (default project folder is edited in Add/Edit only) |
 | **Live updates** | WMI process create/exit events + 2 s fallback poll; grid updates only when data changes |
 | **Single instance** | Second launch activates the existing manager window |
 | **Persistence** | Profiles saved to `profiles.json` in the profiles directory |
 | **Theme** | Light, dark, or **System default** (follows Windows app theme); toolbar selector; saved in `settings.json` |
+| **Check for updates** | Footer link fetches latest scripts from [GitHub](https://github.com/jpolvora/cursor-profile-manager) and overwrites the install folder in place (`.bat` and Desktop shortcuts keep working) |
 | **Safe delete** | Optional data-folder removal; blocked while any instance is running |
 
 ## Usage
@@ -126,6 +129,21 @@ Stored at `<CURSOR_PROFILES_DIR>\settings.json` (manager UI preferences, separat
 | `dark` | Always use the dark palette |
 
 Use the **Theme** dropdown in the toolbar to change this; the choice is saved automatically.
+
+### Updates
+
+Click **Check for updates** in the footer status bar. The manager reads the `# App-Version` marker from your local `cursor-profile-manager.ps1` and from GitHub `master`, then:
+
+| Situation | Result |
+|-----------|--------|
+| Missing version marker (local or GitHub) | Treated as outdated — update offered |
+| GitHub version **greater** than local | Update offered |
+| Same version | “No updates”; optional **force reinstall** with confirmation |
+| Local version **greater** than GitHub | “No updates”; optional **force reinstall** with confirmation |
+
+On apply, it downloads `cursor-profile-manager.ps1`, `cursor-profile-manager.bat`, and `install-desktop-shortcut.ps1`, replaces them in the folder you launched from, then restarts. Existing `.bat` launchers and Desktop shortcuts keep working.
+
+Current release marker in the main script: `# App-Version: 1.2.0` / `$script:AppVersionId`.
 
 ### Manual launch (without the GUI)
 
