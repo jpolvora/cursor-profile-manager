@@ -99,6 +99,8 @@ function Initialize-SingleInstance {
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+[void][System.Windows.Forms.Application]::EnableVisualStyles()
+[void][System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
 
 if (-not ('TextBoxCue' -as [type])) {
     Add-Type @'
@@ -128,7 +130,9 @@ $UiStartLabel = "Start $([char]0x25B6)"
 
 $script:UiFont = New-Object System.Drawing.Font 'Segoe UI', 9
 $script:UiFontSemibold = New-Object System.Drawing.Font 'Segoe UI', 9, ([System.Drawing.FontStyle]::Bold)
-$script:UiBackColor = [System.Drawing.Color]::FromArgb(245, 246, 248)
+$script:UiThemePreference = 'default'
+$script:UiEffectiveTheme = 'light'
+$script:UiBackColor = [System.Drawing.Color]::White
 $script:UiPanelColor = [System.Drawing.Color]::White
 $script:UiBorderColor = [System.Drawing.Color]::FromArgb(220, 223, 228)
 $script:UiTextMuted = [System.Drawing.Color]::FromArgb(96, 101, 108)
@@ -142,6 +146,123 @@ $script:UiSelectionBack = [System.Drawing.Color]::FromArgb(204, 229, 255)
 $script:UiSelectionFore = [System.Drawing.Color]::FromArgb(32, 33, 36)
 $script:UiRunningColor = [System.Drawing.Color]::FromArgb(16, 124, 65)
 $script:UiIdleColor = [System.Drawing.Color]::FromArgb(120, 124, 130)
+$script:UiInputBackColor = [System.Drawing.Color]::White
+$script:UiInputForeColor = [System.Drawing.Color]::FromArgb(32, 33, 36)
+$script:UiThemeComboSync = $false
+
+function Get-UiThemePalettes {
+    return @{
+        light = @{
+            BackColor      = [System.Drawing.Color]::FromArgb(245, 246, 248)
+            PanelColor     = [System.Drawing.Color]::White
+            BorderColor    = [System.Drawing.Color]::FromArgb(220, 223, 228)
+            TextMuted      = [System.Drawing.Color]::FromArgb(96, 101, 108)
+            TextPrimary    = [System.Drawing.Color]::FromArgb(32, 33, 36)
+            Accent         = [System.Drawing.Color]::FromArgb(0, 102, 204)
+            AccentHover    = [System.Drawing.Color]::FromArgb(0, 90, 184)
+            AccentText     = [System.Drawing.Color]::White
+            GridHeader     = [System.Drawing.Color]::FromArgb(248, 249, 251)
+            GridAltRow     = [System.Drawing.Color]::FromArgb(250, 251, 253)
+            SelectionBack  = [System.Drawing.Color]::FromArgb(204, 229, 255)
+            SelectionFore  = [System.Drawing.Color]::FromArgb(32, 33, 36)
+            RunningColor   = [System.Drawing.Color]::FromArgb(16, 124, 65)
+            IdleColor      = [System.Drawing.Color]::FromArgb(120, 124, 130)
+            InputBackColor = [System.Drawing.Color]::White
+            InputForeColor = [System.Drawing.Color]::FromArgb(32, 33, 36)
+        }
+        dark = @{
+            BackColor      = [System.Drawing.Color]::FromArgb(32, 33, 36)
+            PanelColor     = [System.Drawing.Color]::FromArgb(45, 45, 48)
+            BorderColor    = [System.Drawing.Color]::FromArgb(68, 71, 78)
+            TextMuted      = [System.Drawing.Color]::FromArgb(154, 160, 166)
+            TextPrimary    = [System.Drawing.Color]::FromArgb(232, 234, 237)
+            Accent         = [System.Drawing.Color]::FromArgb(0, 120, 212)
+            AccentHover    = [System.Drawing.Color]::FromArgb(0, 103, 181)
+            AccentText     = [System.Drawing.Color]::White
+            GridHeader     = [System.Drawing.Color]::FromArgb(50, 51, 55)
+            GridAltRow     = [System.Drawing.Color]::FromArgb(40, 41, 45)
+            SelectionBack  = [System.Drawing.Color]::FromArgb(0, 72, 128)
+            SelectionFore  = [System.Drawing.Color]::White
+            RunningColor   = [System.Drawing.Color]::FromArgb(76, 195, 113)
+            IdleColor      = [System.Drawing.Color]::FromArgb(154, 160, 166)
+            InputBackColor = [System.Drawing.Color]::FromArgb(55, 56, 60)
+            InputForeColor = [System.Drawing.Color]::FromArgb(232, 234, 237)
+        }
+    }
+}
+
+function Test-WindowsAppsUseLightTheme {
+    try {
+        $value = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name AppsUseLightTheme -ErrorAction Stop
+        return ($value.AppsUseLightTheme -ne 0)
+    }
+    catch {
+        return $true
+    }
+}
+
+function Get-EffectiveUiThemeName {
+    param([string]$Preference = $script:UiThemePreference)
+
+    switch ($Preference) {
+        'light' { return 'light' }
+        'dark' { return 'dark' }
+        default {
+            if (Test-WindowsAppsUseLightTheme) { return 'light' }
+            return 'dark'
+        }
+    }
+}
+
+function Set-UiThemePalette {
+    param([Parameter(Mandatory)][string]$ThemeName)
+
+    $palettes = Get-UiThemePalettes
+    if (-not $palettes.ContainsKey($ThemeName)) {
+        $ThemeName = 'light'
+    }
+    $palette = $palettes[$ThemeName]
+
+    $script:UiEffectiveTheme = $ThemeName
+    $script:UiBackColor = $palette.BackColor
+    $script:UiPanelColor = $palette.PanelColor
+    $script:UiBorderColor = $palette.BorderColor
+    $script:UiTextMuted = $palette.TextMuted
+    $script:UiTextPrimary = $palette.TextPrimary
+    $script:UiAccent = $palette.Accent
+    $script:UiAccentHover = $palette.AccentHover
+    $script:UiAccentText = $palette.AccentText
+    $script:UiGridHeader = $palette.GridHeader
+    $script:UiGridAltRow = $palette.GridAltRow
+    $script:UiSelectionBack = $palette.SelectionBack
+    $script:UiSelectionFore = $palette.SelectionFore
+    $script:UiRunningColor = $palette.RunningColor
+    $script:UiIdleColor = $palette.IdleColor
+    $script:UiInputBackColor = $palette.InputBackColor
+    $script:UiInputForeColor = $palette.InputForeColor
+    $script:DefaultGridForeColor = $script:UiTextPrimary
+    $script:RunningGridForeColor = $script:UiRunningColor
+}
+
+function Get-UiThemePreferenceIndex {
+    param([string]$Preference)
+
+    switch ($Preference) {
+        'light' { return 1 }
+        'dark' { return 2 }
+        default { return 0 }
+    }
+}
+
+function Get-UiThemePreferenceFromIndex {
+    param([int]$Index)
+
+    switch ($Index) {
+        1 { return 'light' }
+        2 { return 'dark' }
+        default { return 'default' }
+    }
+}
 
 function Set-FormIcon {
     param([System.Windows.Forms.Form]$TargetForm)
@@ -181,6 +302,32 @@ function Set-ButtonFlatStyle {
     }
 }
 
+function Update-ToolbarButtonTheme {
+    param(
+        [System.Windows.Forms.Button]$Button,
+        [switch]$Primary
+    )
+
+    if ($Primary) {
+        $Button.BackColor = $script:UiAccent
+        $Button.ForeColor = $script:UiAccentText
+        return
+    }
+
+    $Button.BackColor = $script:UiPanelColor
+    $Button.ForeColor = $script:UiTextPrimary
+    $Button.FlatAppearance.BorderColor = $script:UiBorderColor
+}
+
+function Apply-UiThemeToTextInputs {
+    param([System.Windows.Forms.TextBox[]]$TextBoxes)
+
+    foreach ($textBox in $TextBoxes) {
+        $textBox.BackColor = $script:UiInputBackColor
+        $textBox.ForeColor = $script:UiInputForeColor
+    }
+}
+
 function Apply-DataGridTheme {
     param([System.Windows.Forms.DataGridView]$TargetGrid)
 
@@ -212,6 +359,7 @@ function Apply-DataGridTheme {
 
 $ProfilesRoot = if ($env:CURSOR_PROFILES_DIR) { $env:CURSOR_PROFILES_DIR } else { Join-Path $env:USERPROFILE '.cursor-profiles' }
 $ConfigPath = Join-Path $ProfilesRoot 'profiles.json'
+$SettingsPath = Join-Path $ProfilesRoot 'settings.json'
 
 function Ensure-ProfilesRoot {
     if (-not (Test-Path $ProfilesRoot)) {
@@ -258,6 +406,142 @@ function New-ProfileObject {
         Notes       = $Notes
         CreatedAt   = (Get-Date).ToString('s')
     }
+}
+
+function Load-AppSettings {
+    Ensure-ProfilesRoot
+    if (-not (Test-Path $SettingsPath)) {
+        return
+    }
+    try {
+        $raw = Get-Content -Raw -Path $SettingsPath -Encoding UTF8 -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($raw)) { return }
+        $data = $raw | ConvertFrom-Json
+        if ($null -eq $data) { return }
+        $theme = [string]$data.Theme
+        if ($theme -eq 'light' -or $theme -eq 'dark' -or $theme -eq 'default') {
+            $script:UiThemePreference = $theme
+        }
+    }
+    catch {
+        Write-Warning "Failed to read settings.json: $($_.Exception.Message)"
+    }
+}
+
+function Save-AppSettings {
+    Ensure-ProfilesRoot
+    $settings = [PSCustomObject]@{
+        Theme = $script:UiThemePreference
+    }
+    $settings | ConvertTo-Json -Depth 3 | Set-Content -Path $SettingsPath -Encoding UTF8
+}
+
+function Sync-UiThemeComboSelection {
+    if (-not $script:ThemeCombo) { return }
+
+    $script:UiThemeComboSync = $true
+    try {
+        $script:ThemeCombo.SelectedIndex = Get-UiThemePreferenceIndex -Preference $script:UiThemePreference
+    }
+    finally {
+        $script:UiThemeComboSync = $false
+    }
+}
+
+function Update-ToolbarLayout {
+    if (-not $toolbarPanel -or -not $btnStart) { return }
+
+    $startX = $toolbarPanel.ClientSize.Width - $btnStart.Width - 12
+    $btnStart.Location = New-Object System.Drawing.Point($startX, 10)
+
+    if ($script:ThemeCombo) {
+        $themeWidth = 118
+        $themeLabelWidth = 42
+        $gap = 8
+        $script:ThemeCombo.Width = $themeWidth
+        $script:ThemeCombo.Location = New-Object System.Drawing.Point(($startX - $gap - $themeWidth), 12)
+        if ($script:ThemeLabel) {
+            $script:ThemeLabel.Location = New-Object System.Drawing.Point(($startX - $gap - $themeWidth - $themeLabelWidth - 4), 16)
+        }
+    }
+}
+
+function Apply-UiThemeToMainWindow {
+    if (-not $form) { return }
+
+    $form.SuspendLayout()
+    try {
+        $form.BackColor = $script:UiBackColor
+
+        $statusPanel.BackColor = $script:UiPanelColor
+        $lblStatus.ForeColor = $script:UiTextMuted
+
+        $toolbarPanel.BackColor = $script:UiPanelColor
+        $toolbarSep.BackColor = $script:UiBorderColor
+
+        $contentPanel.BackColor = $script:UiBackColor
+        $lblGridHint.ForeColor = $script:UiTextMuted
+
+        $gridHost.BackColor = $script:UiPanelColor
+        Apply-DataGridTheme -TargetGrid $grid
+
+        Update-ToolbarButtonTheme -Button $btnAdd
+        Update-ToolbarButtonTheme -Button $btnEdit
+        Update-ToolbarButtonTheme -Button $btnDelete
+        Update-ToolbarButtonTheme -Button $btnRefresh
+        Update-ToolbarButtonTheme -Button $btnStart -Primary
+
+        if ($script:ThemeLabel) {
+            $script:ThemeLabel.ForeColor = $script:UiTextMuted
+            $script:ThemeLabel.BackColor = $script:UiPanelColor
+        }
+        if ($script:ThemeCombo) {
+            $script:ThemeCombo.BackColor = $script:UiInputBackColor
+            $script:ThemeCombo.ForeColor = $script:UiInputForeColor
+        }
+
+        Sync-UiThemeComboSelection
+        Update-ToolbarLayout
+    }
+    finally {
+        $form.ResumeLayout($true)
+    }
+}
+
+function Set-UiThemePreference {
+    param(
+        [Parameter(Mandatory)][string]$Preference,
+        [switch]$Persist
+    )
+
+    if ($Preference -ne 'light' -and $Preference -ne 'dark' -and $Preference -ne 'default') {
+        $Preference = 'default'
+    }
+
+    $script:UiThemePreference = $Preference
+    $effective = Get-EffectiveUiThemeName -Preference $Preference
+    $themeChanged = $effective -ne $script:UiEffectiveTheme
+    Set-UiThemePalette -ThemeName $effective
+
+    if ($form) {
+        Apply-UiThemeToMainWindow
+        if ($themeChanged) {
+            Update-ProfileGrid
+        }
+    }
+
+    if ($Persist) {
+        Save-AppSettings
+    }
+}
+
+function Test-UiSystemThemeChanged {
+    if ($script:UiThemePreference -ne 'default') {
+        return $false
+    }
+
+    $effective = Get-EffectiveUiThemeName -Preference 'default'
+    return $effective -ne $script:UiEffectiveTheme
 }
 
 # ---------------------------------------------------------------------------
@@ -605,6 +889,8 @@ function Show-ProfileDialog {
     $dlg.Controls.Add($btnCancel)
     $dlg.CancelButton = $btnCancel
 
+    Apply-UiThemeToTextInputs -TextBoxes @($txtName, $txtDir, $txtProj, $txtNotes)
+
     if (-not $isEdit) {
         $txtName.Add_TextChanged({
             if (-not $txtDir.Tag -or $txtDir.Tag -eq 'auto') {
@@ -646,6 +932,10 @@ function Show-ProfileDialog {
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
+
+Ensure-ProfilesRoot
+Load-AppSettings
+Set-UiThemePalette -ThemeName (Get-EffectiveUiThemeName)
 
 $script:Profiles = Load-Profiles
 
@@ -963,10 +1253,32 @@ $btnStart.Anchor = 'Top, Right'
 Set-ButtonFlatStyle -Button $btnStart -Primary
 $toolbarPanel.Controls.Add($btnStart)
 
-$toolbarPanel.Add_Resize({
-    $btnStart.Location = New-Object System.Drawing.Point(($toolbarPanel.ClientSize.Width - $btnStart.Width - 12), 10)
+$script:ThemeLabel = New-Object System.Windows.Forms.Label
+$script:ThemeLabel.Text = 'Theme:'
+$script:ThemeLabel.AutoSize = $true
+$script:ThemeLabel.Anchor = 'Top, Right'
+$script:ThemeLabel.ForeColor = $script:UiTextMuted
+$script:ThemeLabel.BackColor = $script:UiPanelColor
+$toolbarPanel.Controls.Add($script:ThemeLabel)
+
+$script:ThemeCombo = New-Object System.Windows.Forms.ComboBox
+$script:ThemeCombo.DropDownStyle = 'DropDownList'
+$script:ThemeCombo.Anchor = 'Top, Right'
+$script:ThemeCombo.Size = New-Object System.Drawing.Size(118, 23)
+[void]$script:ThemeCombo.Items.AddRange(@('System default', 'Light', 'Dark'))
+$script:ThemeCombo.SelectedIndex = Get-UiThemePreferenceIndex -Preference $script:UiThemePreference
+$script:ThemeCombo.BackColor = $script:UiInputBackColor
+$script:ThemeCombo.ForeColor = $script:UiInputForeColor
+$script:ThemeCombo.Add_SelectedIndexChanged({
+    if ($script:UiThemeComboSync) { return }
+    $preference = Get-UiThemePreferenceFromIndex -Index $script:ThemeCombo.SelectedIndex
+    if ($preference -eq $script:UiThemePreference) { return }
+    Set-UiThemePreference -Preference $preference -Persist
 })
-$btnStart.Location = New-Object System.Drawing.Point(($toolbarPanel.ClientSize.Width - $btnStart.Width - 12), 10)
+$toolbarPanel.Controls.Add($script:ThemeCombo)
+
+$toolbarPanel.Add_Resize({ Update-ToolbarLayout })
+Update-ToolbarLayout
 
 $btnAdd.Add_Click({
     $result = Show-ProfileDialog -Existing $null
@@ -1073,7 +1385,12 @@ $processEventDebounce.Add_Tick({
 
 $refreshTimer = New-Object System.Windows.Forms.Timer
 $refreshTimer.Interval = 2000
-$refreshTimer.Add_Tick({ Update-ProfileGrid })
+$refreshTimer.Add_Tick({
+    if (Test-UiSystemThemeChanged) {
+        Set-UiThemePreference -Preference $script:UiThemePreference
+    }
+    Update-ProfileGrid
+})
 $refreshTimer.Start()
 
 Start-CursorProcessWatchers -OwnerForm $form -DebounceTimer $processEventDebounce

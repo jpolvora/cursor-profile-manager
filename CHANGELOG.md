@@ -6,6 +6,10 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ## 2026-07-01
 
+### Added
+
+- **GUI themes** — light and dark palettes plus **System default** (follows Windows app light/dark via `AppsUseLightTheme`); toolbar **Theme** dropdown; preference saved to `settings.json`.
+
 ### Removed
 
 - **Tray notifications** — balloon tips on instance start/stop/count change (removed with the buggy notification loop).
@@ -18,6 +22,7 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ### Fixed
 
+- **WinForms visual styles** — enable OS-native control rendering on startup (avoids flat 90s fallback).
 - **Multiple windows per profile** — when a profile already has a window open, Start opens a new window instead of focusing the existing one; repeat launches with a default project use `--new-window` then `--add` (Cursor reuses the window if the same folder is passed in one command).
 - **Instances count** — counts `--type=renderer` windows per profile (was capped at 1 because only the main Electron process was counted).
 - **Instances count (subprocess noise)** — no longer counts gpu/utility helpers from the earlier over-counting fix.

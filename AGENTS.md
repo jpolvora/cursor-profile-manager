@@ -23,7 +23,7 @@ Windows GUI utility to manage and launch **multiple isolated Cursor IDE instance
 
 | Path | Contents |
 |------|----------|
-| `%USERPROFILE%\.cursor-profiles\` | Profile data dirs + `profiles.json` |
+| `%USERPROFILE%\.cursor-profiles\` | Profile data dirs + `profiles.json` + `settings.json` |
 
 Override with `CURSOR_PROFILES_DIR`. Override binary with `CURSOR_BIN`.
 
@@ -62,7 +62,8 @@ Key modules inside the script:
 | Area | Functions | Notes |
 |------|-----------|-------|
 | Single instance | `Initialize-SingleInstance`, `Show-ExistingAppWindow` | Named mutex + Win32 foreground |
-| Storage | `Load-Profiles`, `Save-Profiles`, `New-ProfileObject` | UTF-8 JSON |
+| Storage | `Load-Profiles`, `Save-Profiles`, `New-ProfileObject`, `Load-AppSettings`, `Save-AppSettings` | UTF-8 JSON |
+| UI theme | `Get-UiThemePalettes`, `Test-WindowsAppsUseLightTheme`, `Set-UiThemePalette`, `Set-UiThemePreference`, `Apply-UiThemeToMainWindow` | Light/dark palettes; `default` follows Windows `AppsUseLightTheme` |
 | Process scan | `Get-UserDataDirInstanceCounts`, `Get-ProfileInstanceCount` | CIM `Win32_Process`; count `--type=renderer` per user-data-dir (one window each) |
 | Launch | `Find-CursorExecutable`, `Start-CursorProfileInstance` | |
 | Grid model | `Build-GridModel`, `Test-GridModelEqual`, `Update-ProfileGrid` | View separated from UI |
@@ -162,7 +163,7 @@ $UiStartLabel = "Start $([char]0x25B6)"        # Start ▶
 
 ### WinForms UI
 
-- Load assemblies once: `System.Windows.Forms`, `System.Drawing`.
+- Load assemblies once: `System.Windows.Forms`, `System.Drawing`; then call `Application.EnableVisualStyles()` and `SetCompatibleTextRenderingDefault($false)` before creating any controls.
 - Enable **`DoubleBuffered`** on `DataGridView` via reflection (non-public property).
 - Wrap bulk UI changes in **`SuspendLayout()` / `ResumeLayout($true)`**.
 - Update cells **in place**; compare values before assigning to reduce flicker.

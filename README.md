@@ -46,6 +46,7 @@ Re-run after moving this folder to repair the shortcut.
 | **Live updates** | WMI process create/exit events + 2 s fallback poll; grid updates only when data changes |
 | **Single instance** | Second launch activates the existing manager window |
 | **Persistence** | Profiles saved to `profiles.json` in the profiles directory |
+| **Theme** | Light, dark, or **System default** (follows Windows app theme); toolbar selector; saved in `settings.json` |
 | **Safe delete** | Optional data-folder removal; blocked while any instance is running |
 
 ## Usage
@@ -107,6 +108,24 @@ Stored at `<CURSOR_PROFILES_DIR>\profiles.json`:
 ```
 
 Editable by hand; safe to back up or sync across machines. Read/write uses **UTF-8**.
+
+### `settings.json`
+
+Stored at `<CURSOR_PROFILES_DIR>\settings.json` (manager UI preferences, separate from Cursor profile data):
+
+```json
+{
+  "Theme": "default"
+}
+```
+
+| `Theme` value | Behavior |
+|---------------|----------|
+| `default` | Match Windows **Settings → Personalization → Colors → Choose your mode** (app theme via `AppsUseLightTheme` registry key); updates while the manager is open |
+| `light` | Always use the light palette |
+| `dark` | Always use the dark palette |
+
+Use the **Theme** dropdown in the toolbar to change this; the choice is saved automatically.
 
 ### Manual launch (without the GUI)
 
