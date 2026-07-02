@@ -10,6 +10,26 @@ Each profile gets its own folder under `%USERPROFILE%\.cursor-profiles\` (overri
 
 The Profile Manager itself is a **single-instance app**: only one manager window runs at a time. Launching it again (shortcut, `.bat`, or script) brings the existing window to the front.
 
+## Screenshots
+
+### Main window
+
+Profile list with per-row **Actions** (Start, Focus, Close, Folder, Edit, Del), theme selector, and footer status (version, **Check for updates**, Cursor install info).
+
+![Main window — profile list, Actions column, and footer](screenshots/main-window.png)
+
+### Add Profile
+
+Create a profile with a custom user-data directory, optional default project folder, and notes. Sign in to a different Cursor account the first time that profile launches.
+
+![Add Profile dialog](screenshots/add-profile-dialog.png)
+
+### Check for updates
+
+Footer **Check for updates** compares your local `# App-Version` marker with GitHub `master`. When versions match, you can still force reinstall from GitHub.
+
+![Check for updates — up to date with optional force reinstall](screenshots/check-for-updates.png)
+
 ## Benefits
 
 - **Multiple Cursors on one codebase** — parallel work in separate windows
@@ -175,6 +195,7 @@ Tests use a temporary profiles directory — your real `~/.cursor-profiles` data
 | `install-desktop-shortcut.ps1` | Creates/repairs a Desktop shortcut |
 | `run-tests.ps1` | Pester unit test runner |
 | `tests/` | Unit tests for core helpers and logic |
+| `screenshots/` | README screenshots of the GUI |
 | `CHANGELOG.md` | User-facing change history |
 | `AGENTS.md` | Guide for AI agents and PowerShell conventions in this repo |
 

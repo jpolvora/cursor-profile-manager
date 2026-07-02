@@ -4,6 +4,12 @@ All notable user-facing changes to Cursor Profile Manager.
 
 Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (when applicable). Newest dates first.
 
+## 2026-07-02
+
+### Added
+
+- **README screenshots** — `screenshots/` folder with main window, Add Profile dialog, and Check for updates dialog.
+
 ## 2026-07-01 (4)
 
 ### Changed
