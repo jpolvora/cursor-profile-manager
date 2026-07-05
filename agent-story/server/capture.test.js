@@ -5,8 +5,12 @@ const {
   parseConnectFrames,
   analyzePayload,
   bufferToStorage,
+  bufferToPlainText,
+  decompressBody,
+  decodeConnectBodyToText,
   shouldCaptureHost
 } = require('./capture');
+const zlib = require('zlib');
 
 test('shouldCaptureHost matches cursor and AI domains', () => {
   assert.equal(shouldCaptureHost('api2.cursor.sh'), true);
@@ -86,4 +90,60 @@ test('bufferToStorage preserves binary as base64', () => {
   const stored = bufferToStorage(binary);
   assert.equal(stored.encoding, 'base64');
   assert.match(stored.text, /^base64:/);
+});
+
+test('bufferToPlainText decompresses gzip request bodies', () => {
+  const json = JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }] });
+  const compressed = zlib.gzipSync(Buffer.from(json));
+  const plain = bufferToPlainText(compressed, 'application/json', 'gzip');
+  assert.equal(plain, json);
+});
+
+test('bufferToPlainText decodes connect frames to readable text', () => {
+  const payload = Buffer.from('Explain this function');
+  const frame = Buffer.alloc(5 + payload.length);
+  frame[0] = 0;
+  frame.writeUInt32BE(payload.length, 1);
+  payload.copy(frame, 5);
+
+  const plain = bufferToPlainText(frame, 'application/connect+proto');
+  assert.match(plain, /Explain this function/);
+  assert.doesNotMatch(plain, /^base64:/);
+});
+
+test('decodeConnectBodyToText decompresses gzip-compressed connect frames', () => {
+  const inner = Buffer.from('assistant reply text');
+  const compressed = zlib.gzipSync(inner);
+  const frame = Buffer.alloc(5 + compressed.length);
+  frame[0] = 0x1; // compressed flag
+  frame.writeUInt32BE(compressed.length, 1);
+  compressed.copy(frame, 5);
+
+  const plain = decodeConnectBodyToText(frame);
+  assert.equal(plain, 'assistant reply text');
+});
+
+test('buildCaptureRecord stores decompressed plain text for requests and responses', () => {
+  const { buildCaptureRecord } = require('./capture');
+  const reqJson = JSON.stringify({ prompt: 'test prompt' });
+  const reqCompressed = zlib.gzipSync(Buffer.from(reqJson));
+
+  const record = buildCaptureRecord({
+    clientToProxyRequest: {
+      method: 'POST',
+      url: '/v1/chat',
+      headers: { host: 'api2.cursor.sh', 'content-type': 'application/json', 'content-encoding': 'gzip' }
+    },
+    serverToProxyResponse: {
+      statusCode: 200,
+      headers: { 'content-type': 'application/json' }
+    },
+    isSSL: true,
+    requestStartTime: Date.now() - 100,
+    reqBody: reqCompressed,
+    resBody: Buffer.from(JSON.stringify({ result: 'ok' }))
+  });
+
+  assert.equal(record.request_body, reqJson);
+  assert.match(record.response_body, /"result":"ok"/);
 });

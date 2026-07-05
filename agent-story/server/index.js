@@ -13,7 +13,7 @@ const {
   getLatestInteractionId
 } = require('./db');
 const { extractInteractionContext } = require('./metadata');
-const { shouldCaptureHost, buildCaptureRecord, isStreamingContentType, bufferToStorage } = require('./capture');
+const { shouldCaptureHost, buildCaptureRecord, isStreamingContentType, bufferToPlainText, decompressBody } = require('./capture');
 const {
   registerProfileSession,
   unregisterProfileSession,
@@ -166,10 +166,11 @@ function insertProvisionalStreamingCapture(ctx, host) {
 
   const profileContext = ctx.profileContext || resolveProfileContextForCapture(ctx, PROXY_PORT);
   const urlStr = (ctx.isSSL ? 'https://' : 'http://') + host + (ctx.clientToProxyRequest.url || '');
-  const reqStorage = ctx.reqBody ? bufferToStorage(ctx.reqBody) : { text: '' };
+  const reqRaw = decompressBody(ctx.reqBody || Buffer.alloc(0), ctx.clientToProxyRequest.headers['content-encoding']);
+  const requestBody = bufferToPlainText(reqRaw, ctx.clientToProxyRequest.headers['content-type']);
   const context = extractInteractionContext(
     ctx.clientToProxyRequest.headers,
-    reqStorage.text,
+    requestBody,
     {
       duration_ms: Date.now() - (ctx.requestStartTime || Date.now()),
       response_status: ctx.serverToProxyResponse?.statusCode || 0,
@@ -190,7 +191,7 @@ function insertProvisionalStreamingCapture(ctx, host) {
     method: ctx.clientToProxyRequest.method,
     url: urlStr,
     request_headers: JSON.stringify(ctx.clientToProxyRequest.headers),
-    request_body: reqStorage.text,
+    request_body: requestBody,
     response_status: ctx.serverToProxyResponse?.statusCode || 0,
     response_headers: JSON.stringify(ctx.serverToProxyResponse?.headers || {}),
     response_body: '',

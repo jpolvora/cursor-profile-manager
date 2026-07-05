@@ -69,6 +69,51 @@ function parseConnectFrames(buffer) {
   return frames;
 }
 
+function decompressConnectFramePayload(payload, compressed) {
+  if (!payload || payload.length === 0) return payload;
+  if (!compressed) return payload;
+  try {
+    return zlibGunzip(payload);
+  } catch {
+    try {
+      return zlibInflate(payload);
+    } catch {
+      return payload;
+    }
+  }
+}
+
+function decodeConnectBodyToText(buffer) {
+  const frames = parseConnectFrames(buffer);
+  if (!frames.length) return null;
+
+  const parts = [];
+  for (const frame of frames) {
+    const payload = decompressConnectFramePayload(frame.payload, frame.compressed);
+    if (!payload || payload.length === 0) continue;
+
+    const asText = payload.toString('utf8');
+    const parsedJson = tryParseJson(asText);
+    if (parsedJson) {
+      parts.push(JSON.stringify(parsedJson));
+      continue;
+    }
+
+    const strings = extractPrintableRuns(payload, 4);
+    if (strings.length) {
+      parts.push(...strings);
+      continue;
+    }
+
+    if (isMostlyText(payload)) {
+      parts.push(asText.trim());
+    }
+  }
+
+  if (!parts.length) return null;
+  return parts.join('\n');
+}
+
 function extractPrintableRuns(buffer, minLength = 12) {
   const text = buffer.toString('utf8');
   const runs = text.match(/[\x09\x0a\x0d\x20-\x7e\u00a0-\ufffd]{12,}/g) || [];
@@ -297,16 +342,22 @@ function analyzePayload(buffer, contentType, timing = {}) {
     ? parseNdjson(storage.text)
     : [];
   const connectFrames = (!parsedJson && rawBuffer.length >= 5) ? parseConnectFrames(rawBuffer) : [];
-  const connectStrings = connectFrames.flatMap(frame => extractPrintableRuns(frame.payload, 8));
+  const connectStrings = connectFrames.flatMap(frame => {
+    const payload = decompressConnectFramePayload(frame.payload, frame.compressed);
+    return extractPrintableRuns(payload, 8);
+  });
 
   const streamEvents = sseEvents.length
     ? sseEvents
     : ndjsonRows.length
       ? ndjsonRows.map(row => ({ event: 'message', data: row }))
-      : connectFrames.map((frame, index) => ({
-        event: 'connect-frame',
-        data: { index, flags: frame.flags, endStream: frame.endStream, strings: extractPrintableRuns(frame.payload, 8) }
-      }));
+      : connectFrames.map((frame, index) => {
+        const payload = decompressConnectFramePayload(frame.payload, frame.compressed);
+        return {
+          event: 'connect-frame',
+          data: { index, flags: frame.flags, endStream: frame.endStream, strings: extractPrintableRuns(payload, 8) }
+        };
+      });
 
   const messages = extractMessagesFromObject(parsedJson);
   const tools = extractToolsFromObject(parsedJson);
@@ -378,6 +429,30 @@ function decompressBody(buffer, contentEncoding) {
   return buffer;
 }
 
+function bufferToPlainText(buffer, contentType, contentEncoding) {
+  if (!buffer || buffer.length === 0) return '';
+
+  const raw = decompressBody(buffer, contentEncoding);
+  const ct = normalizeContentType(contentType);
+
+  if (isMostlyText(raw)) {
+    return raw.toString('utf8');
+  }
+
+  if (ct.includes('connect') || ct.includes('proto') || ct.includes('grpc')) {
+    const connectText = decodeConnectBodyToText(raw);
+    if (connectText) return connectText;
+  }
+
+  const connectText = decodeConnectBodyToText(raw);
+  if (connectText) return connectText;
+
+  const strings = extractPrintableRuns(raw, 8);
+  if (strings.length) return strings.join('\n');
+
+  return bufferToStorage(raw).text;
+}
+
 function zlibGunzip(buffer) {
   const zlib = require('zlib');
   return zlib.gunzipSync(buffer);
@@ -418,14 +493,8 @@ function buildCaptureRecord(ctx) {
   const firstChunkMs = ctx.firstChunkTime ? ctx.firstChunkTime - ctx.requestStartTime : null;
   const generationMs = ctx.firstChunkTime ? Date.now() - ctx.firstChunkTime : null;
 
-  const reqRaw = ctx.reqBody || Buffer.alloc(0);
-  const resRaw = decompressBody(
-    ctx.resBody || Buffer.alloc(0),
-    resHeaders['content-encoding']
-  );
-
-  const reqStorage = bufferToStorage(reqRaw);
-  const resStorage = bufferToStorage(resRaw);
+  const reqRaw = decompressBody(ctx.reqBody || Buffer.alloc(0), reqHeaders['content-encoding']);
+  const resRaw = decompressBody(ctx.resBody || Buffer.alloc(0), resHeaders['content-encoding']);
 
   const requestAnalysis = analyzePayload(reqRaw, reqHeaders['content-type'], {
     duration_ms: durationMs,
@@ -442,10 +511,10 @@ function buildCaptureRecord(ctx) {
     method: ctx.clientToProxyRequest.method,
     url: urlStr,
     request_headers: JSON.stringify(reqHeaders),
-    request_body: reqStorage.text,
+    request_body: bufferToPlainText(reqRaw, reqHeaders['content-type']),
     response_status: ctx.serverToProxyResponse?.statusCode || 0,
     response_headers: JSON.stringify(resHeaders),
-    response_body: resStorage.text,
+    response_body: bufferToPlainText(resRaw, resHeaders['content-type']),
     capture: {
       request: requestAnalysis,
       response: responseAnalysis
@@ -456,11 +525,14 @@ function buildCaptureRecord(ctx) {
 module.exports = {
   shouldCaptureHost,
   bufferToStorage,
+  bufferToPlainText,
   storageToBuffer,
   parseConnectFrames,
   parseSseEvents,
   analyzePayload,
   buildCaptureRecord,
   isStreamingContentType,
-  decompressBody
+  decompressBody,
+  decompressConnectFramePayload,
+  decodeConnectBodyToText
 };
