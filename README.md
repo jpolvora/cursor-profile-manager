@@ -82,7 +82,14 @@ Re-run after moving this folder to repair the shortcut.
 5. Click **Start ▶** again on the same row to open another window for that profile.
 6. Use other Actions: **Focus** / **Close** (when running), **Folder**, **Edit**, or **Del**.
 7. On first launch, sign in with the account for that profile; settings and extensions persist there.
-8. To inspect Cursor AI traffic, check the **Run proxied** option in the profile's Add/Edit dialog. Toggle **Start Agent Story** / **Stop Agent Story** on the toolbar, then click **Open dashboard** when the UI is running (or browse to `http://localhost:5173/`). Start your proxied profile — you'll be prompted to start the proxy if port 8080 isn't listening.
+8. To inspect Cursor AI traffic, check the **Run proxied** option in the profile's Add/Edit dialog. Toggle **Start Agent Story** / **Stop Agent Story** on the toolbar, then click **Open dashboard** when the UI is running (or browse to `http://localhost:5173/`). Start your proxied profile — you'll be prompted to start the proxy if port 8080 isn't listening. **Fully quit** any existing Cursor windows for that profile before starting proxied — proxy settings apply at launch only.
+
+Proxied profiles route traffic two ways:
+
+- **Chromium** (telemetry, auth, updates): `--proxy-server` + `--ignore-certificate-errors`
+- **Node agent subprocesses** (Agent panel LLM traffic on `agent.api5.cursor.sh`): `HTTP_PROXY` / `HTTPS_PROXY` env vars, `http.proxy` in the profile's `User/settings.json`, and `NODE_TLS_REJECT_UNAUTHORIZED=0` for the MITM self-signed cert
+
+On every **Start**, the manager also writes `<user-data-dir>\cursor-profile-manager.context.json` (profile id, name, project path, main PID) and registers with Agent Story so proxied requests group under the correct project instead of **Unassigned**.
 
 ## Technical details
 
@@ -117,6 +124,7 @@ The UI grid is driven by an in-memory model; the grid is touched only when that 
 | `CURSOR_BIN` | Path to `Cursor.exe` (auto-detected if unset) |
 | `AGENT_STORY_DIR` | Path to the `agent-story` folder (default: `agent-story\` under the manager install folder) |
 | `AGENT_STORY_UI_URL` | Agent Story dashboard URL for **Open dashboard** (default: `http://localhost:5173/`) |
+| `AGENT_STORY_PROXY_URL` | MITM proxy URL for proxied profile launches (default: `http://127.0.0.1:8080`) |
 
 Cursor IDE is auto-detected under `%LOCALAPPDATA%\Programs\cursor\` (or `Cursor\`), then `cursor` on PATH. The footer shows the detected version; the **cursor** CLI is checked on PATH or beside the IDE install. Use **Install Cursor** in the footer if neither is found.
 

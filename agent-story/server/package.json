@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test metadata.test.js capture.test.js",
+    "test": "node --test metadata.test.js capture.test.js profileContext.test.js",
     "start": "node index.js"
   },
   "keywords": [],

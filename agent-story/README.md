@@ -21,7 +21,7 @@
 - **💾 Local Persistence**: Uses SQLite (`better-sqlite3`) for fast, zero-configuration storage of raw JSON requests and responses.
 - **🎨 Beautiful Dashboard**: A stunning, modern web interface built with React and Vite. It features **live SSE updates**, markdown rendering, and syntax highlighting for intercepted prompts.
 - **🔍 Deep Inspection**: View exact headers, status codes, payloads, and **request metadata** (project path, Cursor window session, duration) sent and received by the AI agents.
-- **📁 Project & Window Grouping**: Sidebar groups traffic by detected workspace/project and Cursor window instance (`x-session-id`), so you can filter one project or one IDE window at a time.
+- **📁 Project & Window Grouping**: Sidebar groups traffic by detected workspace/project and Cursor window instance (`x-session-id`), so you can filter one project or one IDE window at a time. When launched from **Cursor Profile Manager**, captures also use the profile's configured project path via `cursor-profile-manager.context.json` and main-process registration (fixes most **Unassigned** telemetry).
 
 ## 🏗️ Architecture
 

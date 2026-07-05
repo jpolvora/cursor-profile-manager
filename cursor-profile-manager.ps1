@@ -18,8 +18,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 2.0.2
-$script:AppVersionId = '2.0.2'
+# App-Version: 2.0.6
+$script:AppVersionId = '2.0.6'
 $script:AppDisplayName = 'Cursor Profile Manager'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
@@ -30,6 +30,8 @@ $script:lblAgentStoryStatus = $null
 $script:lnkAgentStoryOpen = $null
 $script:sepAgentStory = $null
 $script:AgentStoryUiUrl = 'http://localhost:5173/'
+$script:AgentStoryProxyUrl = 'http://127.0.0.1:8080'
+$script:ProfileContextMarkerFile = 'cursor-profile-manager.context.json'
 $script:UiShuttingDown = $false
 $script:InstallRoot = $PSScriptRoot
 $script:UpdateRepoId = 'jpolvora/cursor-profile-manager'
@@ -1232,6 +1234,13 @@ function Test-AgentStoryProxyRunning {
     return $false
 }
 
+function Get-CursorProxyUrl {
+    if ($env:AGENT_STORY_PROXY_URL -and -not [string]::IsNullOrWhiteSpace($env:AGENT_STORY_PROXY_URL)) {
+        return $env:AGENT_STORY_PROXY_URL.Trim()
+    }
+    return $script:AgentStoryProxyUrl
+}
+
 function Get-CursorProxyLaunchArgs {
     param(
         [bool]$UseProxy
@@ -1240,10 +1249,254 @@ function Get-CursorProxyLaunchArgs {
     if (-not $UseProxy) {
         return @()
     }
+    $proxyUrl = Get-CursorProxyUrl
     return @(
-        '--proxy-server=http://127.0.0.1:8080',
+        "--proxy-server=$proxyUrl",
         '--ignore-certificate-errors'
     )
+}
+
+function Get-CursorProxyEnvironmentVariables {
+    param(
+        [bool]$UseProxy
+    )
+
+    if (-not $UseProxy) {
+        return @{}
+    }
+
+    $proxyUrl = Get-CursorProxyUrl
+    return @{
+        HTTP_PROXY                   = $proxyUrl
+        HTTPS_PROXY                  = $proxyUrl
+        NO_PROXY                     = 'localhost,127.0.0.1'
+        NODE_TLS_REJECT_UNAUTHORIZED = '0'
+    }
+}
+
+function Get-CursorProfileContextMarkerPath {
+    param(
+        [Parameter(Mandatory)][string]$UserDataDir
+    )
+
+    return Join-Path $UserDataDir $script:ProfileContextMarkerFile
+}
+
+function Write-CursorProfileContextMarker {
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$Profile,
+        [int]$MainProcessId = 0
+    )
+
+    if (-not (Test-Path $Profile.UserDataDir)) {
+        New-Item -ItemType Directory -Path $Profile.UserDataDir -Force | Out-Null
+    }
+
+    $marker = @{
+        profileId     = $Profile.Id
+        profileName   = $Profile.Name
+        userDataDir   = $Profile.UserDataDir
+        projectPath   = if ($Profile.ProjectPath) { $Profile.ProjectPath } else { $null }
+        mainProcessId = if ($MainProcessId -gt 0) { $MainProcessId } else { $null }
+        registeredAt  = (Get-Date).ToString('o')
+        managerVersion = Get-AppVersionId
+    }
+
+    $markerPath = Get-CursorProfileContextMarkerPath -UserDataDir $Profile.UserDataDir
+    $json = $marker | ConvertTo-Json -Depth 4
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($markerPath, $json, $utf8NoBom)
+}
+
+function Get-CursorProfileIdentityEnvironmentVariables {
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$Profile
+    )
+
+    $projectPath = if ($Profile.ProjectPath) { $Profile.ProjectPath } else { '' }
+    return @{
+        CURSOR_PROFILE_MANAGER_ID              = $Profile.Id
+        CURSOR_PROFILE_MANAGER_NAME            = $Profile.Name
+        CURSOR_PROFILE_MANAGER_USER_DATA_DIR   = $Profile.UserDataDir
+        CURSOR_PROFILE_MANAGER_PROJECT_PATH    = $projectPath
+    }
+}
+
+function Register-CursorProfileWithAgentStory {
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$Profile,
+        [int]$MainProcessId = 0
+    )
+
+    if (-not (Test-AgentStoryServicePortListening -Port 3001)) {
+        return
+    }
+
+    $body = @{
+        profileId       = $Profile.Id
+        profileName     = $Profile.Name
+        userDataDir     = $Profile.UserDataDir
+        projectPath     = if ($Profile.ProjectPath) { $Profile.ProjectPath } else { $null }
+        mainProcessId   = if ($MainProcessId -gt 0) { $MainProcessId } else { $null }
+    } | ConvertTo-Json -Depth 4
+
+    try {
+        Invoke-RestMethod -Uri 'http://127.0.0.1:3001/api/profile-sessions/register' `
+            -Method Post -Body $body -ContentType 'application/json; charset=utf-8' -TimeoutSec 3 | Out-Null
+    }
+    catch {
+        Write-Warning "Agent Story profile registration failed: $($_.Exception.Message)"
+    }
+}
+
+function Merge-Hashtables {
+    param(
+        [hashtable[]]$Tables
+    )
+
+    $merged = @{}
+    foreach ($table in $Tables) {
+        if ($null -eq $table) { continue }
+        foreach ($key in $table.Keys) {
+            $merged[$key] = $table[$key]
+        }
+    }
+    return $merged
+}
+
+function Start-CursorProfileProcess {
+    param(
+        [Parameter(Mandatory)][string]$ExecutablePath,
+        [Parameter(Mandatory)][string[]]$ArgumentList,
+        [hashtable]$Environment = @{},
+        [Parameter(Mandatory)][PSCustomObject]$Profile
+    )
+
+    $proc = Invoke-ProcessWithEnvironment -FilePath $ExecutablePath -ArgumentList $ArgumentList -Environment $Environment -PassThru
+    if ($proc -and -not $proc.HasExited) {
+        Write-CursorProfileContextMarker -Profile $Profile -MainProcessId $proc.Id
+        Register-CursorProfileWithAgentStory -Profile $Profile -MainProcessId $proc.Id
+    }
+    return $proc
+}
+
+function Get-CursorProfileUserSettingsPath {
+    param(
+        [Parameter(Mandatory)][string]$UserDataDir
+    )
+
+    return Join-Path (Join-Path $UserDataDir 'User') 'settings.json'
+}
+
+function Read-JsonObjectHashtableFromFile {
+    param(
+        [string]$Path
+    )
+
+    if (-not $Path -or -not (Test-Path $Path)) {
+        return @{}
+    }
+
+    try {
+        $raw = Get-Content -Raw -Path $Path -Encoding UTF8 -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            return @{}
+        }
+
+        $obj = $raw | ConvertFrom-Json
+        if ($null -eq $obj) {
+            return @{}
+        }
+
+        $hash = @{}
+        foreach ($prop in $obj.PSObject.Properties) {
+            $hash[$prop.Name] = $prop.Value
+        }
+        return $hash
+    }
+    catch {
+        Write-Warning "Failed to read JSON settings from $Path : $($_.Exception.Message)"
+        return @{}
+    }
+}
+
+function Write-JsonObjectHashtableToFile {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][hashtable]$Data
+    )
+
+    $json = $Data | ConvertTo-Json -Depth 20
+    Set-Content -Path $Path -Value $json -Encoding UTF8
+}
+
+function Update-CursorProfileProxySettings {
+    param(
+        [Parameter(Mandatory)][string]$UserDataDir,
+        [bool]$EnableProxy
+    )
+
+    $userDir = Join-Path $UserDataDir 'User'
+    if (-not (Test-Path $userDir)) {
+        New-Item -ItemType Directory -Path $userDir -Force | Out-Null
+    }
+
+    $settingsPath = Get-CursorProfileUserSettingsPath -UserDataDir $UserDataDir
+    $settings = Read-JsonObjectHashtableFromFile -Path $settingsPath
+
+    if ($EnableProxy) {
+        $settings['http.proxy'] = Get-CursorProxyUrl
+        $settings['http.proxyStrictSSL'] = $false
+    }
+    else {
+        if ($settings.ContainsKey('http.proxy')) {
+            $settings.Remove('http.proxy')
+        }
+        if ($settings.ContainsKey('http.proxyStrictSSL')) {
+            $settings.Remove('http.proxyStrictSSL')
+        }
+    }
+
+    Write-JsonObjectHashtableToFile -Path $settingsPath -Data $settings
+}
+
+function Invoke-ProcessWithEnvironment {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$ArgumentList,
+        [hashtable]$Environment = @{},
+        [switch]$PassThru
+    )
+
+    if ($Environment.Count -eq 0) {
+        if ($PassThru) {
+            return Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -PassThru
+        }
+        Start-Process -FilePath $FilePath -ArgumentList $ArgumentList
+        return
+    }
+
+    $backup = @{}
+    try {
+        foreach ($key in $Environment.Keys) {
+            $backup[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+            [Environment]::SetEnvironmentVariable($key, [string]$Environment[$key], 'Process')
+        }
+        if ($PassThru) {
+            return Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -PassThru
+        }
+        Start-Process -FilePath $FilePath -ArgumentList $ArgumentList
+    }
+    finally {
+        foreach ($key in $backup.Keys) {
+            if ([string]::IsNullOrEmpty($backup[$key])) {
+                [Environment]::SetEnvironmentVariable($key, $null, 'Process')
+            }
+            else {
+                [Environment]::SetEnvironmentVariable($key, $backup[$key], 'Process')
+            }
+        }
+    }
 }
 
 function Get-NpmExecutablePath {
@@ -1345,6 +1598,32 @@ function Ensure-NodeDependencies {
     }
 }
 
+function Register-RunningProxiedProfilesWithAgentStory {
+    if (-not (Test-AgentStoryServicePortListening -Port 3001)) {
+        return
+    }
+
+    foreach ($profile in $script:Profiles) {
+        if (-not $profile.RunProxied) { continue }
+
+        $instanceCount = Get-ProfileInstanceCount -UserDataDir $profile.UserDataDir
+        if ($instanceCount -le 0) { continue }
+
+        $mainPid = 0
+        $procs = @(Get-CimInstance Win32_Process -Filter "name='Cursor.exe'" -ErrorAction SilentlyContinue)
+        foreach ($proc in $procs) {
+            $dir = Get-NormalizedUserDataDirFromCommandLine -CommandLine $proc.CommandLine
+            if ($dir -ne $profile.UserDataDir.TrimEnd('\', '/').ToLowerInvariant()) { continue }
+            if ($proc.CommandLine -match '--type=') { continue }
+            $mainPid = [int]$proc.ProcessId
+            break
+        }
+
+        Write-CursorProfileContextMarker -Profile $profile -MainProcessId $mainPid
+        Register-CursorProfileWithAgentStory -Profile $profile -MainProcessId $mainPid
+    }
+}
+
 function Start-AgentStoryProxy {
     $runState = Resolve-AgentStoryRunState
     if ($runState -eq 'Running') {
@@ -1428,6 +1707,8 @@ function Start-AgentStoryProxy {
         Show-AgentStoryStartFailure -Message "Agent Story started but exited or failed to bind ports 8080, 3001, and 5173.`n`nCheck for port conflicts or run server/ui manually from agent-story\ to see errors."
         return $false
     }
+
+    Register-RunningProxiedProfilesWithAgentStory
 
     Update-AgentStoryUiState
     return $true
@@ -2279,7 +2560,9 @@ function Start-CursorProfileInstance {
         }
     }
 
+    $useProxy = $false
     $extraArgs = @()
+    $proxyEnv = @{}
     if ($Profile.RunProxied) {
         $proxyRunning = Test-AgentStoryProxyRunning
 
@@ -2308,8 +2591,18 @@ function Start-CursorProfileInstance {
             }
         }
 
-        $extraArgs = Get-CursorProxyLaunchArgs -UseProxy:$proxyRunning
+        $useProxy = [bool]$proxyRunning
+        $extraArgs = Get-CursorProxyLaunchArgs -UseProxy:$useProxy
+        $proxyEnv = Get-CursorProxyEnvironmentVariables -UseProxy:$useProxy
     }
+
+    Update-CursorProfileProxySettings -UserDataDir $Profile.UserDataDir -EnableProxy:$useProxy
+
+    $launchEnv = Merge-Hashtables @(
+        (Get-CursorProfileIdentityEnvironmentVariables -Profile $Profile),
+        $proxyEnv
+    )
+    Write-CursorProfileContextMarker -Profile $Profile
 
     $instanceCounts = Get-UserDataDirInstanceCounts
     $runningCount = Get-ProfileInstanceCount -UserDataDir $Profile.UserDataDir -InstanceCounts $instanceCounts
@@ -2317,9 +2610,9 @@ function Start-CursorProfileInstance {
     # Cursor/VS Code reuses the existing window when the same folder is already open,
     # even with --new-window. Open an empty window, then --add the project folder.
     if ($runningCount -gt 0 -and $projectExists) {
-        Start-Process -FilePath $cursor -ArgumentList (@("--user-data-dir=$($Profile.UserDataDir)", '--new-window') + $extraArgs)
+        Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList (@("--user-data-dir=$($Profile.UserDataDir)", '--new-window') + $extraArgs) -Environment $launchEnv -Profile $Profile | Out-Null
         Start-Sleep -Milliseconds 800
-        Start-Process -FilePath $cursor -ArgumentList (@("--user-data-dir=$($Profile.UserDataDir)", '--add', $Profile.ProjectPath) + $extraArgs)
+        Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList (@("--user-data-dir=$($Profile.UserDataDir)", '--add', $Profile.ProjectPath) + $extraArgs) -Environment $launchEnv -Profile $Profile | Out-Null
         return
     }
 
@@ -2328,7 +2621,7 @@ function Start-CursorProfileInstance {
         $argList += $Profile.ProjectPath
     }
 
-    Start-Process -FilePath $cursor -ArgumentList $argList
+    Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList $argList -Environment $launchEnv -Profile $Profile | Out-Null
 }
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,46 @@ All notable user-facing changes to Cursor Profile Manager.
 
 Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (when applicable). Newest dates first.
 
+## 2.0.6
+
+### Fixed
+
+- **Profile grouping** — PowerShell port-map script used invalid syntax (`$out = @{} Get-NetTCPConnection`), so PID→profile resolution failed for almost all captures; profile context now always wins over bogus inferred paths (`workbench`, `p:`); Agent Story auto-loads profile markers on startup; running proxied profiles re-register when Agent Story starts.
+
+### Changed
+
+- Release marker bumped to **2.0.6** (`# App-Version` / `$script:AppVersionId`).
+
+## 2.0.5
+
+### Fixed
+
+- **Profile grouping (Unassigned)** — marker files written by PowerShell had a UTF-8 BOM that broke JSON parsing; Agent Story now strips BOM, writes markers without BOM, falls back to profile name/user-data-dir when no project folder is set, caches client-port→PID lookups, and uses a single-session fallback when only one profile is registered.
+
+### Changed
+
+- Release marker bumped to **2.0.5** (`# App-Version` / `$script:AppVersionId`).
+
+## 2.0.4
+
+### Added
+
+- **Profile context for Agent Story** — on Start, the manager writes `cursor-profile-manager.context.json` into the profile's user-data dir, sets `CURSOR_PROFILE_MANAGER_*` env vars, registers the main process with Agent Story (`POST /api/profile-sessions/register`), and the proxy resolves the client PID to that profile so captures use the configured **project path** instead of **Unassigned**.
+
+### Changed
+
+- Release marker bumped to **2.0.4** (`# App-Version` / `$script:AppVersionId`).
+
+## 2.0.3
+
+### Fixed
+
+- **Proxied agent traffic** — proxied profile launches now also set `HTTP_PROXY` / `HTTPS_PROXY`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, and the profile's `User/settings.json` `http.proxy` / `http.proxyStrictSSL` entries so Cursor's Node agent subprocesses (e.g. `agent.api5.cursor.sh`) route through Agent Story, not just Chromium telemetry.
+
+### Changed
+
+- Release marker bumped to **2.0.3** (`# App-Version` / `$script:AppVersionId`).
+
 ## 2.0.2
 
 ### Added

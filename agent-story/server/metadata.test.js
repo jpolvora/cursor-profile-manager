@@ -29,6 +29,35 @@ test('inferProjectKey extracts workspacePath from JSON body', () => {
   assert.equal(key, 'C:/Users/dev/projects/demo-app/src/index.ts');
 });
 
+test('extractInteractionContext prefers profile manager over bogus inferred paths', () => {
+  const { extractInteractionContext } = require('./metadata');
+  const { buildProfileContext } = require('./profileContext');
+
+  const context = extractInteractionContext(
+    { 'x-session-id': 'win-42' },
+    JSON.stringify({ workspace: 'e://vscode-app/out/vs/workbench' }),
+    {
+      profileContext: buildProfileContext({
+        profileId: 'pid-1',
+        profileName: 'jpolvora',
+        userDataDir: 'D:/cursor/jpolvora',
+        projectPath: null
+      })
+    }
+  );
+
+  assert.equal(context.project_key, 'D:/cursor/jpolvora');
+  const metadata = JSON.parse(context.metadata);
+  assert.equal(metadata.profile_manager.profile_name, 'jpolvora');
+});
+
+test('isLikelyWorkspacePath rejects vscode internal paths', () => {
+  const { isLikelyWorkspacePath } = require('./metadata');
+  assert.equal(isLikelyWorkspacePath('e://vscode-app/out/vs/workbench'), false);
+  assert.equal(isLikelyWorkspacePath('p:'), false);
+  assert.equal(isLikelyWorkspacePath('L:/source/demo-project'), true);
+});
+
 test('extractInteractionContext stores metadata without authorization', () => {
   const context = extractInteractionContext(
     {

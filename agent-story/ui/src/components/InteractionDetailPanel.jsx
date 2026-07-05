@@ -1,84 +1,31 @@
 import { useState } from 'react';
 import {
-  Server,
-  Clock,
   ChevronDown,
   ChevronRight,
+  ChevronRight as ExpandIcon,
+  Clock,
   FolderKanban,
+  MessageSquare,
   Monitor,
-  Timer,
-  Zap,
   Radio,
-  MessageSquare
+  Server,
+  Timer,
+  X,
+  Zap
 } from 'lucide-react';
 import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
 import json from 'react-syntax-highlighter/dist/esm/languages/hljs/json';
 import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import MarkdownRenderer from './MarkdownRenderer';
+import {
+  decodeBodyPreview,
+  extractMarkdownFromParsed,
+  getInteractionSummary,
+  shortInstance,
+  tryParseJSON
+} from '../utils/interactionUtils';
 
 SyntaxHighlighter.registerLanguage('json', json);
-
-function tryParseJSON(str) {
-  try {
-    if (!str) return null;
-    return JSON.parse(str);
-  } catch {
-    return null;
-  }
-}
-
-function shortInstance(key) {
-  if (!key) return null;
-  if (key.length <= 16) return key;
-  return key.slice(0, 8) + '…' + key.slice(-4);
-}
-
-function decodeBodyPreview(raw) {
-  if (!raw) return { label: '(empty)', content: '', isJson: false };
-  if (raw.startsWith('base64:')) {
-    return {
-      label: 'Binary (base64)',
-      content: raw,
-      isJson: false
-    };
-  }
-  const parsed = tryParseJSON(raw);
-  if (parsed) {
-    return { label: 'JSON', content: JSON.stringify(parsed, null, 2), isJson: true, parsed };
-  }
-  return { label: 'Text', content: raw, isJson: false };
-}
-
-function extractMarkdownFromParsed(parsed) {
-  if (!parsed) return null;
-
-  if (Array.isArray(parsed.messages)) {
-    const textParts = parsed.messages
-      .flatMap(m => {
-        if (typeof m.content === 'string') return [m.content];
-        if (Array.isArray(m.content)) {
-          return m.content.filter(p => p.type === 'text').map(p => p.text);
-        }
-        return [];
-      })
-      .join('\n\n---\n\n');
-    if (textParts.trim()) return textParts;
-  }
-
-  if (Array.isArray(parsed.choices)) {
-    const textParts = parsed.choices
-      .flatMap(c => {
-        if (c.message?.content) return [c.message.content];
-        if (c.text) return [c.text];
-        if (c.delta?.content) return [c.delta.content];
-        return [];
-      })
-      .join('');
-    if (textParts.trim()) return textParts;
-  }
-
-  return null;
-}
 
 function BodySection({ title, raw, previewText }) {
   const [open, setOpen] = useState(false);
@@ -87,7 +34,7 @@ function BodySection({ title, raw, previewText }) {
 
   return (
     <div className="body-section">
-      <button className="section-toggle" onClick={() => setOpen(o => !o)}>
+      <button type="button" className="section-toggle" onClick={() => setOpen(o => !o)}>
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span className="section-title">{title}</span>
       </button>
@@ -124,7 +71,7 @@ function MetadataSection({ metadata }) {
 
   return (
     <div className="body-section">
-      <button className="section-toggle" onClick={() => setOpen(o => !o)}>
+      <button type="button" className="section-toggle" onClick={() => setOpen(o => !o)}>
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span className="section-title">Capture Metadata</span>
       </button>
@@ -143,34 +90,28 @@ function MetadataSection({ metadata }) {
   );
 }
 
-export default function InteractionCard({ interaction }) {
-  const isError = interaction.response_status >= 400;
-  const baseUrl = interaction.url.split('?')[0];
-  const metadata = tryParseJSON(interaction.metadata);
-  const projectLabel = metadata?.project_label
-    || (interaction.project_key ? interaction.project_key.split('/').filter(Boolean).pop() : null);
-  const usage = metadata?.usage;
+function DetailContent({ interaction }) {
+  const summary = getInteractionSummary(interaction);
+  const { metadata, projectLabel, usage } = summary;
   const hasBadges = projectLabel || interaction.instance_key || metadata?.duration_ms != null
     || metadata?.streaming || metadata?.tokens_per_second || usage?.total_tokens;
 
   return (
-    <div className="interaction-card">
-      <div className="card-header">
-        <div className="card-header-left">
+    <div className="detail-content">
+      <div className="detail-header">
+        <div className="detail-header-top">
           <Server size={16} color="var(--primary-accent)" />
           <span className={`method-badge method-${interaction.method.toLowerCase()}`}>
             {interaction.method}
           </span>
-          <span className="url" title={interaction.url}>{baseUrl}</span>
-        </div>
-        <div className="card-header-right">
-          <span className="timestamp">
-            <Clock size={13} />
-            {new Date(interaction.timestamp).toLocaleTimeString()}
-          </span>
-          <span className={`status-badge ${isError ? 'status-err' : 'status-ok'}`}>
+          <span className={`status-badge ${summary.isError ? 'status-err' : 'status-ok'}`}>
             {interaction.response_status}
           </span>
+        </div>
+        <div className="detail-url" title={interaction.url}>{interaction.url}</div>
+        <div className="detail-timestamp">
+          <Clock size={13} />
+          {new Date(interaction.timestamp).toLocaleString()}
         </div>
       </div>
 
@@ -213,7 +154,10 @@ export default function InteractionCard({ interaction }) {
             </span>
           )}
           {usage?.total_tokens != null && (
-            <span className="meta-badge" title={`prompt ${usage.prompt_tokens ?? '?'} · completion ${usage.completion_tokens ?? '?'}`}>
+            <span
+              className="meta-badge"
+              title={`prompt ${usage.prompt_tokens ?? '?'} · completion ${usage.completion_tokens ?? '?'}`}
+            >
               <MessageSquare size={12} />
               {usage.total_tokens} tokens{usage.estimated ? ' est.' : ''}
             </span>
@@ -237,5 +181,54 @@ export default function InteractionCard({ interaction }) {
       <BodySection title="Request Payload" raw={interaction.request_body} previewText={metadata?.prompt_preview} />
       <BodySection title="Response Payload" raw={interaction.response_body} previewText={metadata?.assistant_text_preview} />
     </div>
+  );
+}
+
+export default function InteractionDetailPanel({
+  interaction,
+  expanded,
+  onToggle,
+  onClearSelection
+}) {
+  return (
+    <aside className={`detail-panel ${expanded ? 'detail-panel-open' : 'detail-panel-collapsed'}`}>
+      <button
+        type="button"
+        className="detail-panel-toggle"
+        onClick={onToggle}
+        title={expanded ? 'Collapse details' : 'Expand details'}
+        aria-expanded={expanded}
+      >
+        {expanded ? <ChevronRight size={16} /> : <ExpandIcon size={16} />}
+      </button>
+
+      {expanded && (
+        <>
+          <div className="detail-panel-header">
+            <span className="detail-panel-title">Request details</span>
+            {interaction && (
+              <button
+                type="button"
+                className="detail-panel-close"
+                onClick={onClearSelection}
+                title="Clear selection"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+
+          <div className="detail-panel-body">
+            {interaction ? (
+              <DetailContent interaction={interaction} />
+            ) : (
+              <div className="detail-empty">
+                Select a row in the grid to inspect request and response payloads.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </aside>
   );
 }

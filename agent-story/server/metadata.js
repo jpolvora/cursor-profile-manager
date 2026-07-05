@@ -88,27 +88,44 @@ function findPathInText(text) {
   return null;
 }
 
+function isLikelyWorkspacePath(pathValue) {
+  if (!pathValue || typeof pathValue !== 'string') return false;
+  const normalized = pathValue.toLowerCase();
+  if (normalized.startsWith('p:') || normalized.startsWith('e:')) return false;
+  if (normalized.includes('/out/vs/') || normalized.includes('\\out\\vs\\')) return false;
+  if (normalized.includes('vscode-app') || normalized.includes('electron-utility')) return false;
+  if (/^[a-z]:\/?$/.test(normalized)) return false;
+  if (normalized.includes(':/') && !/^[a-z]:\//.test(normalized)) return false;
+  return true;
+}
+
 function inferProjectKey(headers, bodyText) {
   const normalizedHeaders = normalizeHeaders(headers);
   const headerWorkspace = normalizedHeaders['x-cursor-workspace'] || normalizedHeaders['x-workspace-path'];
   if (headerWorkspace) {
-    return normalizePath(headerWorkspace);
+    const normalized = normalizePath(headerWorkspace);
+    if (isLikelyWorkspacePath(normalized)) {
+      return normalized;
+    }
   }
 
   if (bodyText) {
     try {
       const parsed = JSON.parse(bodyText);
       const fromObject = findWorkspaceInObject(parsed);
-      if (fromObject) return fromObject;
+      if (fromObject && isLikelyWorkspacePath(fromObject)) return fromObject;
     } catch {
       // fall through to regex scan
     }
     const fromText = findPathInText(bodyText);
-    if (fromText) {
+    if (fromText && isLikelyWorkspacePath(fromText)) {
       const parts = fromText.split('/');
       if (parts.length > 1) {
         parts.pop();
-        return parts.join('/') || fromText;
+        const parent = parts.join('/') || fromText;
+        if (isLikelyWorkspacePath(parent)) {
+          return parent;
+        }
       }
       return fromText;
     }
@@ -164,11 +181,59 @@ function buildMetadata(headers, bodyText, extras = {}) {
   return metadata;
 }
 
+function buildInstanceKey(headers, profileContext) {
+  const sessionId = inferInstanceKey(headers);
+  const profileId = profileContext?.profile_id || null;
+
+  if (sessionId && profileId) {
+    return `${profileId}:${sessionId}`;
+  }
+  if (sessionId) {
+    return sessionId;
+  }
+  if (profileId) {
+    return `profile:${profileId}`;
+  }
+  return null;
+}
+
+function applyProfileContext(metadata, profileContext) {
+  if (!profileContext) {
+    return metadata;
+  }
+
+  metadata.profile_manager = {
+    profile_id: profileContext.profile_id || null,
+    profile_name: profileContext.profile_name || null,
+    user_data_dir: profileContext.user_data_dir || null,
+    project_path: profileContext.project_path || null,
+    project_label: profileContext.project_label || null,
+    main_process_id: profileContext.main_process_id || null,
+    client_pid: profileContext.client_pid || null,
+    source: profileContext.source || null
+  };
+
+  if (profileContext.project_path) {
+    metadata.project_path = profileContext.project_path;
+    metadata.project_label = profileContext.project_label || basenameFromPath(profileContext.project_path);
+  }
+  else if (profileContext.project_label) {
+    metadata.project_label = profileContext.project_label;
+  }
+
+  return metadata;
+}
+
 function extractInteractionContext(headers, bodyText, extras = {}) {
   const metadata = buildMetadata(headers, bodyText, extras);
+  applyProfileContext(metadata, extras.profileContext);
+
   return {
-    project_key: metadata.project_path || null,
-    instance_key: metadata.instance_id || null,
+    project_key: metadata.profile_manager?.project_path
+      || metadata.profile_manager?.user_data_dir
+      || (isLikelyWorkspacePath(metadata.project_path) ? metadata.project_path : null)
+      || null,
+    instance_key: buildInstanceKey(headers, extras.profileContext || metadata.profile_manager),
     metadata: JSON.stringify(metadata)
   };
 }
@@ -178,5 +243,10 @@ module.exports = {
   inferProjectKey,
   inferInstanceKey,
   buildMetadata,
-  normalizeHeaders
+  normalizeHeaders,
+  normalizePath,
+  basenameFromPath,
+  applyProfileContext,
+  buildInstanceKey,
+  isLikelyWorkspacePath
 };

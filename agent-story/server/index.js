@@ -13,6 +13,14 @@ const {
 } = require('./db');
 const { extractInteractionContext } = require('./metadata');
 const { shouldCaptureHost, buildCaptureRecord, isStreamingContentType } = require('./capture');
+const {
+  registerProfileSession,
+  unregisterProfileSession,
+  listProfileSessions,
+  resolveProfileContextForCapture,
+  loadProfileSessionsFromMarkers,
+  getProjectLabelForKey
+} = require('./profileContext');
 const sse = require('./sse');
 
 const proxy = new Proxy();
@@ -106,9 +114,7 @@ app.get('/api/projects', (req, res) => {
 
       return {
         ...project,
-        label: project.project_key === '__unassigned__'
-          ? 'Unassigned'
-          : (project.project_key.split('/').filter(Boolean).pop() || project.project_key),
+        label: getProjectLabelForKey(project.project_key),
         sessions
       };
     }));
@@ -136,6 +142,36 @@ app.get('/api/interactions/search', (req, res) => {
   }
 });
 
+app.get('/api/profile-sessions', (req, res) => {
+  try {
+    res.json(listProfileSessions());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/profile-sessions/register', (req, res) => {
+  try {
+    const context = registerProfileSession(req.body || {});
+    if (!context) {
+      res.status(400).json({ error: 'userDataDir is required' });
+      return;
+    }
+    res.json(context);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/profile-sessions/:profileId', (req, res) => {
+  try {
+    const removed = unregisterProfileSession(req.params.profileId);
+    res.json({ removed });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 const PROXY_PORT = 8080;
 
 proxy.onError(function(ctx, err) {
@@ -153,6 +189,8 @@ proxy.onRequest(function(ctx, callback) {
   if (!shouldCaptureHost(host)) {
     return callback();
   }
+
+  ctx.profileContext = resolveProfileContextForCapture(ctx, PROXY_PORT);
 
   const reqChunks = [];
   ctx.onRequestData(function(ctx, chunk, callback) {
@@ -195,6 +233,7 @@ proxy.onRequest(function(ctx, callback) {
     try {
       const record = buildCaptureRecord(ctx);
       const durationMs = Date.now() - (ctx.requestStartTime || Date.now());
+      const profileContext = ctx.profileContext || resolveProfileContextForCapture(ctx, PROXY_PORT);
       const context = extractInteractionContext(
         ctx.clientToProxyRequest.headers,
         record.request_body,
@@ -202,7 +241,8 @@ proxy.onRequest(function(ctx, callback) {
           duration_ms: durationMs,
           response_status: record.response_status,
           host,
-          capture: record.capture
+          capture: record.capture,
+          profileContext
         }
       );
 
@@ -233,6 +273,7 @@ proxy.onRequest(function(ctx, callback) {
       const resSummary = record.capture.response;
       console.log(
         `[Proxy] #${result.lastInsertRowid} ${record.method} ${record.url}` +
+        (context.project_key ? ` [${context.project_key.split('/').pop()}]` : ' [unassigned]') +
         (resSummary.streaming ? ' [stream]' : '') +
         (resSummary.tokens_per_second ? ` ${resSummary.tokens_per_second} tok/s` : '') +
         ` ${durationMs}ms`
@@ -249,6 +290,10 @@ proxy.onRequest(function(ctx, callback) {
 
 function startApiServer() {
   const server = app.listen(API_PORT, () => {
+    const loaded = loadProfileSessionsFromMarkers();
+    if (loaded.length > 0) {
+      console.log(`Loaded ${loaded.length} profile session(s) from markers.`);
+    }
     console.log(`Agent Story API listening on http://localhost:${API_PORT}`);
   });
   server.on('error', (err) => {

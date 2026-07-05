@@ -1,9 +1,26 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Activity, Wifi, WifiOff } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import SearchBar from './components/SearchBar';
-import InteractionCard from './components/InteractionCard';
+import InteractionGrid from './components/InteractionGrid';
+import InteractionDetailPanel from './components/InteractionDetailPanel';
 import { API, useAgentStoryEvents } from './hooks/useAgentStoryEvents';
+import { useProjects } from './hooks/useProjects';
+
+function useDebouncedCallback(callback, delay) {
+  const timerRef = useRef(null);
+  const callbackRef = useRef(callback);
+  callbackRef.current = callback;
+
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
+
+  return useCallback((...args) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => callbackRef.current(...args), delay);
+  }, [delay]);
+}
 
 export default function App() {
   const [interactions, setInteractions] = useState([]);
@@ -15,6 +32,10 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [methodFilter, setMethodFilter] = useState('ALL');
   const [sidebarRefreshToken, setSidebarRefreshToken] = useState(0);
+  const [selectedId, setSelectedId] = useState(null);
+  const [detailExpanded, setDetailExpanded] = useState(true);
+
+  const projects = useProjects(sidebarRefreshToken);
 
   const fetchInteractions = useCallback(async () => {
     const params = new URLSearchParams();
@@ -34,6 +55,10 @@ export default function App() {
       const data = await res.json();
       setInteractions(data);
       setError(null);
+      setSelectedId(prev => {
+        if (prev == null) return null;
+        return data.some(row => row.id === prev) ? prev : null;
+      });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -46,11 +71,13 @@ export default function App() {
     fetchInteractions();
   }, [fetchInteractions]);
 
+  const debouncedRefresh = useDebouncedCallback(() => {
+    fetchInteractions();
+    setSidebarRefreshToken(token => token + 1);
+  }, 250);
+
   const { connected: liveConnected, activeStreams } = useAgentStoryEvents({
-    onInteraction: () => {
-      fetchInteractions();
-      setSidebarRefreshToken(token => token + 1);
-    }
+    onInteraction: debouncedRefresh
   });
 
   const handleSelectProject = useCallback((projectKey) => {
@@ -58,6 +85,7 @@ export default function App() {
     setActiveInstance(null);
     setActiveThread(null);
     setSearchTerm('');
+    setSelectedId(null);
   }, []);
 
   const handleSelectSession = useCallback((projectKey, instanceKey) => {
@@ -65,14 +93,48 @@ export default function App() {
     setActiveInstance(instanceKey);
     setActiveThread(null);
     setSearchTerm('');
+    setSelectedId(null);
   }, []);
 
   const handleSearch = useCallback((term) => {
     setSearchTerm(term);
     if (term) {
       setActiveThread(null);
+      setSelectedId(null);
     }
   }, []);
+
+  const handleSelectInteraction = useCallback((id) => {
+    setSelectedId(id);
+    setDetailExpanded(true);
+  }, []);
+
+  const handleProjectFilterChange = useCallback((projectKey) => {
+    setActiveProject(projectKey);
+    setActiveInstance(null);
+    setActiveThread(null);
+    setSelectedId(null);
+  }, []);
+
+  const handleClearFilters = useCallback(() => {
+    setActiveProject(null);
+    setActiveInstance(null);
+    setActiveThread(null);
+    setSearchTerm('');
+    setMethodFilter('ALL');
+    setSelectedId(null);
+  }, []);
+
+  const filtersActive = activeProject != null
+    || activeInstance != null
+    || activeThread != null
+    || methodFilter !== 'ALL'
+    || searchTerm.trim().length > 0;
+
+  const selectedInteraction = useMemo(
+    () => interactions.find(row => row.id === selectedId) ?? null,
+    [interactions, selectedId]
+  );
 
   const filterSummary = [
     activeProject ? `project: ${activeProject.split('/').pop()}` : null,
@@ -100,49 +162,55 @@ export default function App() {
           activeInstance={activeInstance}
           onSelectProject={handleSelectProject}
           onSelectSession={handleSelectSession}
-          refreshToken={sidebarRefreshToken}
+          projects={projects}
         />
 
-        <main className="main-panel">
-          <SearchBar
-            onSearch={handleSearch}
-            onMethodChange={setMethodFilter}
-            method={methodFilter}
-          />
+        <div className="workspace">
+          <main className="main-panel">
+            <SearchBar
+              onSearch={handleSearch}
+              onMethodChange={setMethodFilter}
+              method={methodFilter}
+              projects={projects}
+              projectFilter={activeProject}
+              onProjectChange={handleProjectFilterChange}
+              onClearFilters={handleClearFilters}
+              filtersActive={filtersActive}
+              externalSearchTerm={searchTerm}
+            />
 
-          {filterSummary && (
-            <div className="filter-summary">Filtering by {filterSummary}</div>
-          )}
-
-          {activeStreams.length > 0 && (
-            <div className="stream-banner">
-              {activeStreams.map(stream => (
-                <div key={stream.capture_key} className="stream-banner-item">
-                  <span className="stream-pulse" />
-                  Streaming {stream.method} {stream.url.split('/').pop()} · {stream.bytes} bytes · TTFT {stream.time_to_first_token_ms}ms
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="interactions-list">
-            {loading ? (
-              <div className="loading">Listening for Cursor traffic...</div>
-            ) : error ? (
-              <div className="error-state">Search error: {error}</div>
-            ) : interactions.length === 0 ? (
-              <div className="empty-state">
-                {searchTerm
-                  ? `No results for "${searchTerm}"`
-                  : 'No interactions recorded yet. Configure Cursor to use the MITM proxy on port 8080.'}
-              </div>
-            ) : (
-              interactions.map(interaction => (
-                <InteractionCard key={interaction.id} interaction={interaction} />
-              ))
+            {filterSummary && (
+              <div className="filter-summary">Filtering by {filterSummary}</div>
             )}
-          </div>
-        </main>
+
+            {activeStreams.length > 0 && (
+              <div className="stream-banner">
+                {activeStreams.map(stream => (
+                  <div key={stream.capture_key} className="stream-banner-item">
+                    <span className="stream-pulse" />
+                    Streaming {stream.method} {stream.url.split('/').pop()} · {stream.bytes} bytes · TTFT {stream.time_to_first_token_ms}ms
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <InteractionGrid
+              interactions={interactions}
+              selectedId={selectedId}
+              onSelect={handleSelectInteraction}
+              loading={loading}
+              error={error}
+              searchTerm={searchTerm}
+            />
+          </main>
+
+          <InteractionDetailPanel
+            interaction={selectedInteraction}
+            expanded={detailExpanded}
+            onToggle={() => setDetailExpanded(value => !value)}
+            onClearSelection={() => setSelectedId(null)}
+          />
+        </div>
       </div>
     </div>
   );

@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { FolderKanban, ChevronDown, ChevronRight, Monitor } from 'lucide-react';
-import { API } from '../hooks/useAgentStoryEvents';
 
 function shortInstance(key) {
   if (!key) return 'Unknown session';
@@ -25,23 +24,9 @@ export default function Sidebar({
   activeInstance,
   onSelectProject,
   onSelectSession,
-  refreshToken
+  projects = []
 }) {
-  const [projects, setProjects] = useState([]);
   const [expanded, setExpanded] = useState(() => new Set());
-
-  const fetchProjects = useCallback(async () => {
-    try {
-      const res = await fetch(`${API}/api/projects`);
-      if (res.ok) setProjects(await res.json());
-    } catch (err) {
-      console.error('Sidebar refresh failed:', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchProjects();
-  }, [fetchProjects, refreshToken]);
 
   useEffect(() => {
     if (!activeProject) return;

@@ -120,6 +120,8 @@ Rules:
 - **Multiple instances** of the same profile are allowed — each Start adds another `--new-window`.
 - When the profile is **already running** and has a default project folder, launch empty `--new-window` then `--add <project>` (same-folder reuse otherwise).
 - Detect `Cursor.exe` at `%LOCALAPPDATA%\Programs\cursor\` and `Programs\Cursor\`, then `cursor` on PATH.
+- **RunProxied profiles** (when Agent Story proxy is running): append `--proxy-server=<url>` and `--ignore-certificate-errors`; launch via `Invoke-ProcessWithEnvironment` with `HTTP_PROXY` / `HTTPS_PROXY` and `NODE_TLS_REJECT_UNAUTHORIZED=0` so Node agent subprocesses use the MITM proxy; sync `http.proxy` / `http.proxyStrictSSL` in `<user-data-dir>\User\settings.json`. Proxy URL defaults to `http://127.0.0.1:8080` (`AGENT_STORY_PROXY_URL` overrides). User must **fully quit** existing Cursor windows for that profile before relaunching proxied — proxy env applies at process start only.
+- **Profile context (all launches):** write `<user-data-dir>\cursor-profile-manager.context.json`, set `CURSOR_PROFILE_MANAGER_*` env vars on spawn, register main PID with Agent Story (`POST /api/profile-sessions/register`). The proxy maps client TCP connections → Cursor PID → user-data-dir → project path for capture grouping.
 
 ## App architecture (main script)
 
@@ -141,7 +143,7 @@ Key modules inside the script:
 | UI theme | `Get-UiThemePalettes`, `Test-WindowsAppsUseLightTheme`, `Set-UiThemePalette`, `Set-UiThemePreference`, `Apply-UiThemeToMainWindow` | Light/dark palettes; `default` follows Windows `AppsUseLightTheme` |
 | In-app update | `Invoke-CheckForAppUpdate`, `Get-AppVersionIdFromScriptContent`, `Compare-AppVersionId`, `Start-DeferredAppUpdate` | Raw GitHub `master` files; version compare via `# App-Version` / `$script:AppVersionId`; deferred copy after exit |
 | Process scan | `Get-NormalizedUserDataDirFromCommandLine`, `Get-UserDataDirInstanceCountsFromProcessRecords`, `Get-UserDataDirInstanceCounts`, `Get-ProfileInstanceCount` | CIM `Win32_Process`; count `--type=renderer` per user-data-dir (one window each); parsing helpers are unit-tested with mock process records |
-| Launch | `Find-CursorExecutable`, `Find-CursorCliExecutable`, `Get-CursorInstallInfo`, `Test-CursorInstallReady`, `Show-CursorInstallDialog`, `Start-CursorProfileInstance` | |
+| Launch | `Find-CursorExecutable`, `Find-CursorCliExecutable`, `Get-CursorInstallInfo`, `Test-CursorInstallReady`, `Show-CursorInstallDialog`, `Start-CursorProfileInstance`, `Get-CursorProxyUrl`, `Get-CursorProxyLaunchArgs`, `Get-CursorProxyEnvironmentVariables`, `Update-CursorProfileProxySettings`, `Write-CursorProfileContextMarker`, `Register-CursorProfileWithAgentStory`, `Start-CursorProfileProcess`, `Invoke-ProcessWithEnvironment` | Proxied launches set Chromium flags + Node proxy env + profile `http.proxy`; all launches write profile context marker and register PID with Agent Story |
 | Focus | `Get-CursorProfileWindowHandles`, `Invoke-FocusCursorProfile` | EnumWindows by profile PIDs; cycles when multiple windows |
 | Close | `Invoke-CloseAllCursorProfileInstances` | WM_CLOSE on profile windows, then force-stop remaining PIDs |
 | Grid actions | `Add-GridActionColumns`, `Invoke-GridProfileAction`, `Sync-GridActionInstallState`, `Edit-Profile`, `Remove-Profile` | Per-row buttons: Start, Focus, Close, Folder, Edit, Del |
