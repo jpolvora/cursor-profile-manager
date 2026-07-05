@@ -394,10 +394,7 @@ function zlibBrotli(buffer) {
 }
 
 function shouldCaptureHost(host) {
-  const h = String(host || '').toLowerCase();
-  return h.includes('cursor')
-    || h.endsWith('.cursor.sh')
-    || h.includes('cursor.sh:');
+  return true;
 }
 
 function buildCaptureRecord(ctx) {
