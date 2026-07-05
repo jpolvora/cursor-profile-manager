@@ -19,14 +19,15 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 2.0.12
-$script:AppVersionId = '2.0.12'
+# App-Version: 2.0.17
+$script:AppVersionId = '2.0.17'
 $script:AppDisplayName = 'Cursor Profile Manager'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
 $script:AgentStoryProxyProcess = $null
 $script:AgentStoryUiProcess = $null
 $script:btnAgentStory = $null
+$script:btnAgentStoryCleanDb = $null
 $script:lblAgentStoryStatus = $null
 $script:lnkAgentStoryOpen = $null
 $script:sepAgentStory = $null
@@ -1012,6 +1013,9 @@ function Apply-ToolbarTheme {
     if ($script:btnAgentStory) {
         Update-ToolbarButtonTheme -Button $script:btnAgentStory
     }
+    if ($script:btnAgentStoryCleanDb) {
+        Update-ToolbarButtonTheme -Button $script:btnAgentStoryCleanDb
+    }
     if ($script:lblAgentStoryStatus) {
         $script:lblAgentStoryStatus.BackColor = $script:UiPanelColor
     }
@@ -1447,6 +1451,152 @@ function Find-AgentStoryRoot {
     return $null
 }
 
+function Get-AgentStoryDatabasePaths {
+    param(
+        [AllowEmptyString()][string]$AgentStoryRoot
+    )
+
+    if (-not $PSBoundParameters.ContainsKey('AgentStoryRoot')) {
+        $AgentStoryRoot = Find-AgentStoryRoot
+    }
+    elseif ([string]::IsNullOrWhiteSpace($AgentStoryRoot)) {
+        return , @()
+    }
+
+    if (-not $AgentStoryRoot) {
+        return , @()
+    }
+
+    $basePath = Join-Path (Join-Path $AgentStoryRoot 'server') 'agent-story.db'
+    return , @(
+        $basePath,
+        "$basePath-wal",
+        "$basePath-shm"
+    )
+}
+
+function Remove-AgentStoryDatabaseFiles {
+    param(
+        [Parameter(Mandatory)][string[]]$DatabasePaths
+    )
+
+    $deleted = @()
+    $failed = @()
+
+    foreach ($path in $DatabasePaths) {
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        try {
+            Remove-Item -LiteralPath $path -Force
+            $deleted += $path
+        }
+        catch {
+            $failed += $path
+        }
+    }
+
+    return @{
+        Deleted = $deleted
+        Failed  = $failed
+    }
+}
+
+function Invoke-AgentStoryDatabaseClean {
+    param(
+        [switch]$SkipConfirmation,
+        [switch]$NoRestart
+    )
+
+    $root = Find-AgentStoryRoot
+    if (-not $root) {
+        if (-not $SkipConfirmation) {
+            [System.Windows.Forms.MessageBox]::Show(
+                'Agent Story directory not found. Expected agent-story\ under the manager install folder, or set AGENT_STORY_DIR to override.',
+                'Agent Story',
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            ) | Out-Null
+        }
+        return $false
+    }
+
+    $dbPaths = Get-AgentStoryDatabasePaths -AgentStoryRoot $root
+    $existingPaths = @($dbPaths | Where-Object { Test-Path -LiteralPath $_ })
+    if ($existingPaths.Count -eq 0) {
+        if (-not $SkipConfirmation) {
+            [System.Windows.Forms.MessageBox]::Show(
+                'No Agent Story database files were found. Nothing to clean.',
+                'Agent Story',
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+        }
+        return $true
+    }
+
+    if (-not $SkipConfirmation) {
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            @(
+                'Delete all captured Agent Story interactions and restart with an empty database?'
+                ''
+                'Agent Story will be stopped while the database is removed.'
+                'If it is currently running, it will start again automatically.'
+                ''
+                'This cannot be undone.'
+            ) -join "`n",
+            'Clean Agent Story Database',
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        )
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) {
+            return $false
+        }
+    }
+
+    $wasRunning = Test-AgentStoryAnyRunning
+    if ($wasRunning) {
+        Stop-AgentStory
+        Start-Sleep -Milliseconds 800
+    }
+
+    $removeResult = Remove-AgentStoryDatabaseFiles -DatabasePaths $dbPaths
+    if ($removeResult.Failed.Count -gt 0) {
+        $failedList = ($removeResult.Failed | ForEach-Object { "  $_" }) -join "`n"
+        if (-not $SkipConfirmation) {
+            [System.Windows.Forms.MessageBox]::Show(
+                @(
+                    'Could not delete one or more Agent Story database files:'
+                    $failedList
+                    ''
+                    'Make sure Agent Story is fully stopped and no other program has the database open.'
+                ) -join "`n",
+                'Agent Story',
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            ) | Out-Null
+        }
+        Update-AgentStoryUiState
+        return $false
+    }
+
+    if ($wasRunning -and -not $NoRestart) {
+        [void](Start-AgentStoryProxy)
+    }
+    else {
+        Update-AgentStoryUiState
+    }
+
+    if (-not $SkipConfirmation) {
+        [System.Windows.Forms.MessageBox]::Show(
+            'Agent Story database was cleared. A fresh database will be created the next time Agent Story starts.',
+            'Agent Story',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+    }
+
+    return $true
+}
+
 function Test-TcpPortInUse {
     param(
         [Parameter(Mandatory)][int]$Port
@@ -1572,11 +1722,15 @@ function Get-CursorProxyEnvironmentVariables {
     }
 
     $proxyUrl = Get-CursorProxyUrl
+    # Windows process env keys are case-insensitive (HTTP_PROXY == http_proxy for Node/Chromium).
     return @{
         HTTP_PROXY                   = $proxyUrl
         HTTPS_PROXY                  = $proxyUrl
+        ALL_PROXY                    = $proxyUrl
         NO_PROXY                     = $script:CursorNoProxyList
         NODE_TLS_REJECT_UNAUTHORIZED = '0'
+        GLOBAL_AGENT_HTTP_PROXY      = $proxyUrl
+        GLOBAL_AGENT_HTTPS_PROXY     = $proxyUrl
     }
 }
 
@@ -1737,6 +1891,99 @@ function Write-JsonObjectHashtableToFile {
     Set-Content -Path $Path -Value $json -Encoding UTF8
 }
 
+function Get-CursorProfileArgvPath {
+    param(
+        [Parameter(Mandatory)][string]$UserDataDir
+    )
+
+    return Join-Path $UserDataDir 'argv.json'
+}
+
+function Read-JsonObjectHashtableFromFileAllowBools {
+    param(
+        [string]$Path
+    )
+
+    if (-not $Path -or -not (Test-Path $Path)) {
+        return @{}
+    }
+
+    try {
+        $raw = Get-Content -Raw -Path $Path -Encoding UTF8 -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            return @{}
+        }
+
+        $obj = $raw | ConvertFrom-Json
+        if ($null -eq $obj) {
+            return @{}
+        }
+
+        $hash = @{}
+        foreach ($prop in $obj.PSObject.Properties) {
+            $hash[$prop.Name] = $prop.Value
+        }
+        return $hash
+    }
+    catch {
+        throw
+    }
+}
+
+function Write-JsonObjectHashtableToFileNoBom {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][hashtable]$Data
+    )
+
+    $json = $Data | ConvertTo-Json -Depth 20
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
+}
+
+function Update-CursorProfileArgvProxy {
+    param(
+        [Parameter(Mandatory)][string]$UserDataDir,
+        [bool]$EnableProxy
+    )
+
+    $argvPath = Get-CursorProfileArgvPath -UserDataDir $UserDataDir
+    $argv = @{}
+
+    if (Test-Path $argvPath) {
+        try {
+            $argv = Read-JsonObjectHashtableFromFileAllowBools -Path $argvPath
+        }
+        catch {
+            Write-Warning "Skipping argv.json proxy update for $argvPath : invalid JSON ($($_.Exception.Message))"
+            return
+        }
+    }
+
+    $proxyKeys = @('proxy-server', 'proxy-bypass-list', 'ignore-certificate-errors')
+    if ($EnableProxy) {
+        $argv['proxy-server'] = Get-CursorProxyUrl
+        $argv['proxy-bypass-list'] = $script:CursorProxyBypassList
+        $argv['ignore-certificate-errors'] = $true
+    }
+    else {
+        foreach ($key in $proxyKeys) {
+            if ($argv.ContainsKey($key)) {
+                $argv.Remove($key)
+            }
+        }
+    }
+
+    if ($argv.Count -eq 0) {
+        if (Test-Path $argvPath) {
+            Remove-Item -Path $argvPath -Force
+        }
+        return
+    }
+
+    Write-JsonObjectHashtableToFileNoBom -Path $argvPath -Data $argv
+}
+
 function Update-CursorProfileProxySettings {
     param(
         [Parameter(Mandatory)][string]$UserDataDir,
@@ -1758,6 +2005,7 @@ function Update-CursorProfileProxySettings {
         Write-JsonObjectHashtableToFile -Path $settingsPath -Data @{
             'http.proxy'           = Get-CursorProxyUrl
             'http.proxyStrictSSL'  = $false
+            'http.proxySupport'    = 'on'
         }
         return
     }
@@ -1778,6 +2026,7 @@ function Update-CursorProfileProxySettings {
     if ($EnableProxy) {
         $settings['http.proxy'] = Get-CursorProxyUrl
         $settings['http.proxyStrictSSL'] = $false
+        $settings['http.proxySupport'] = 'on'
     }
     else {
         if ($settings.ContainsKey('http.proxy')) {
@@ -1785,6 +2034,9 @@ function Update-CursorProfileProxySettings {
         }
         if ($settings.ContainsKey('http.proxyStrictSSL')) {
             $settings.Remove('http.proxyStrictSSL')
+        }
+        if ($settings.ContainsKey('http.proxySupport')) {
+            $settings.Remove('http.proxySupport')
         }
     }
 
@@ -1807,26 +2059,32 @@ function Invoke-ProcessWithEnvironment {
         return
     }
 
-    $backup = @{}
-    try {
-        foreach ($key in $Environment.Keys) {
-            $backup[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
-            [Environment]::SetEnvironmentVariable($key, [string]$Environment[$key], 'Process')
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.UseShellExecute = $false
+    $psi.Arguments = ($ArgumentList | ForEach-Object {
+        $arg = [string]$_
+        if ($arg -match '[\s"]') {
+            '"' + ($arg -replace '"', '\"') + '"'
         }
-        if ($PassThru) {
-            return Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -PassThru
+        else {
+            $arg
         }
-        Start-Process -FilePath $FilePath -ArgumentList $ArgumentList
+    }) -join ' '
+
+    foreach ($entry in [Environment]::GetEnvironmentVariables('Process').GetEnumerator()) {
+        $null = $psi.EnvironmentVariables[$entry.Key] = [string]$entry.Value
     }
-    finally {
-        foreach ($key in $backup.Keys) {
-            if ([string]::IsNullOrEmpty($backup[$key])) {
-                [Environment]::SetEnvironmentVariable($key, $null, 'Process')
-            }
-            else {
-                [Environment]::SetEnvironmentVariable($key, $backup[$key], 'Process')
-            }
-        }
+    foreach ($key in $Environment.Keys) {
+        $null = $psi.EnvironmentVariables[$key] = [string]$Environment[$key]
+    }
+
+    $process = [System.Diagnostics.Process]::Start($psi)
+    if (-not $process) {
+        throw "Failed to start process: $FilePath"
+    }
+    if ($PassThru) {
+        return $process
     }
 }
 
@@ -2966,6 +3224,7 @@ function Start-CursorProfileInstance {
     }
 
     Update-CursorProfileProxySettings -UserDataDir $Profile.UserDataDir -EnableProxy:$useProxy
+    Update-CursorProfileArgvProxy -UserDataDir $Profile.UserDataDir -EnableProxy:$useProxy
 
     $launchEnv = Merge-Hashtables @(
         (Get-CursorProfileIdentityEnvironmentVariables -Profile $Profile),
@@ -3749,6 +4008,7 @@ $btnAdd = New-ToolbarButton -Text 'Add'
 $btnRefresh = New-ToolbarButton -Text 'Refresh'
 $script:sepAgentStory = New-ToolbarFlowSeparator
 $script:btnAgentStory = New-ToolbarButton -Text 'Start Agent Story' -Width 132
+$script:btnAgentStoryCleanDb = New-ToolbarButton -Text 'Clean DB' -Width 78
 $script:lblAgentStoryStatus = New-Object System.Windows.Forms.Label
 $script:lblAgentStoryStatus.Text = "$([char]0x25CB) Agent Story: Stopped"
 $script:lblAgentStoryStatus.ForeColor = $script:UiTextMuted
@@ -3777,6 +4037,7 @@ $script:ProfileFlow.Controls.AddRange(@(
     $btnRefresh,
     $script:sepAgentStory,
     $script:btnAgentStory,
+    $script:btnAgentStoryCleanDb,
     $script:lblAgentStoryStatus,
     $script:lnkAgentStoryOpen
 ))
@@ -3861,6 +4122,10 @@ $script:btnAgentStory.Add_Click({
     else {
         [void](Start-AgentStoryProxy)
     }
+})
+
+$script:btnAgentStoryCleanDb.Add_Click({
+    [void](Invoke-AgentStoryDatabaseClean)
 })
 
 $grid.Add_CellContentClick({

@@ -2,6 +2,52 @@
 
 . "$PSScriptRoot\Bootstrap.ps1"
 
+Describe 'Agent Story database paths' {
+    Context 'Get-AgentStoryDatabasePaths' {
+        It 'returns empty when Agent Story root is missing' {
+            (Get-AgentStoryDatabasePaths -AgentStoryRoot '').Count | Should Be 0
+        }
+
+        It 'returns db, wal, and shm paths under server' {
+            $tempRoot = Join-Path $env:TEMP ("cpm-agent-story-" + [guid]::NewGuid().ToString())
+            New-Item -ItemType Directory -Path (Join-Path $tempRoot 'server') -Force | Out-Null
+            try {
+                $paths = Get-AgentStoryDatabasePaths -AgentStoryRoot $tempRoot
+                $paths.Count | Should Be 3
+                $paths[0] | Should Match '\\server\\agent-story\.db$'
+                $paths[1] | Should Match '\\server\\agent-story\.db-wal$'
+                $paths[2] | Should Match '\\server\\agent-story\.db-shm$'
+            }
+            finally {
+                Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    Context 'Remove-AgentStoryDatabaseFiles' {
+        It 'deletes existing database files and skips missing ones' {
+            $tempRoot = Join-Path $env:TEMP ("cpm-agent-story-" + [guid]::NewGuid().ToString())
+            $serverDir = Join-Path $tempRoot 'server'
+            New-Item -ItemType Directory -Path $serverDir -Force | Out-Null
+            $dbPath = Join-Path $serverDir 'agent-story.db'
+            $walPath = "$dbPath-wal"
+            try {
+                Set-Content -Path $dbPath -Value 'test' -Encoding ASCII
+                Set-Content -Path $walPath -Value 'wal' -Encoding ASCII
+
+                $result = Remove-AgentStoryDatabaseFiles -DatabasePaths (Get-AgentStoryDatabasePaths -AgentStoryRoot $tempRoot)
+                $result.Deleted.Count | Should Be 2
+                $result.Failed.Count | Should Be 0
+                Test-Path -LiteralPath $dbPath | Should Be $false
+                Test-Path -LiteralPath $walPath | Should Be $false
+            }
+            finally {
+                Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
 Describe 'Agent Story dashboard URL' {
     Context 'Get-AgentStoryUiUrl' {
         It 'returns the default localhost dashboard URL' {
@@ -126,8 +172,61 @@ Describe 'Cursor proxy launch helpers' {
             $envVars = Get-CursorProxyEnvironmentVariables -UseProxy:$true
             $envVars.HTTP_PROXY | Should Be 'http://127.0.0.1:8080'
             $envVars.HTTPS_PROXY | Should Be 'http://127.0.0.1:8080'
+            $envVars.ALL_PROXY | Should Be 'http://127.0.0.1:8080'
+            $envVars.GLOBAL_AGENT_HTTP_PROXY | Should Be 'http://127.0.0.1:8080'
+            $envVars.GLOBAL_AGENT_HTTPS_PROXY | Should Be 'http://127.0.0.1:8080'
             $envVars.NODE_TLS_REJECT_UNAUTHORIZED | Should Be '0'
             $envVars.NO_PROXY | Should Be 'localhost,127.0.0.1,.github.com,github.com,.gitlab.com,gitlab.com,.bitbucket.org,bitbucket.org'
+        }
+    }
+
+    Context 'Update-CursorProfileArgvProxy' {
+        It 'writes proxy runtime args to argv.json when enabled' {
+            $tempDir = Join-Path $env:TEMP ("cpm-argv-" + [guid]::NewGuid().ToString())
+            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+            try {
+                Update-CursorProfileArgvProxy -UserDataDir $tempDir -EnableProxy:$true
+                $argvPath = Get-CursorProfileArgvPath -UserDataDir $tempDir
+                Test-Path $argvPath | Should Be $true
+                $argv = Read-JsonObjectHashtableFromFileAllowBools -Path $argvPath
+                $argv['proxy-server'] | Should Be 'http://127.0.0.1:8080'
+                $argv['proxy-bypass-list'] | Should Be $script:CursorProxyBypassList
+                $argv['ignore-certificate-errors'] | Should Be $true
+            }
+            finally {
+                Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        It 'removes proxy runtime args from argv.json when disabled' {
+            $tempDir = Join-Path $env:TEMP ("cpm-argv-" + [guid]::NewGuid().ToString())
+            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+            try {
+                Update-CursorProfileArgvProxy -UserDataDir $tempDir -EnableProxy:$true
+                Update-CursorProfileArgvProxy -UserDataDir $tempDir -EnableProxy:$false
+                $argvPath = Get-CursorProfileArgvPath -UserDataDir $tempDir
+                Test-Path $argvPath | Should Be $false
+            }
+            finally {
+                Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        It 'preserves unrelated argv.json keys when toggling proxy' {
+            $tempDir = Join-Path $env:TEMP ("cpm-argv-" + [guid]::NewGuid().ToString())
+            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+            try {
+                Write-JsonObjectHashtableToFileNoBom -Path (Get-CursorProfileArgvPath -UserDataDir $tempDir) -Data @{
+                    'enable-crash-reporter' = $true
+                }
+                Update-CursorProfileArgvProxy -UserDataDir $tempDir -EnableProxy:$true
+                $argv = Read-JsonObjectHashtableFromFileAllowBools -Path (Get-CursorProfileArgvPath -UserDataDir $tempDir)
+                $argv['enable-crash-reporter'] | Should Be $true
+                $argv['proxy-server'] | Should Be 'http://127.0.0.1:8080'
+            }
+            finally {
+                Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 
@@ -142,6 +241,7 @@ Describe 'Cursor proxy launch helpers' {
                 $settings = Read-JsonObjectHashtableFromFile -Path $settingsPath
                 $settings['http.proxy'] | Should Be 'http://127.0.0.1:8080'
                 $settings['http.proxyStrictSSL'] | Should Be $false
+                $settings['http.proxySupport'] | Should Be 'on'
             }
             finally {
                 Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -157,6 +257,7 @@ Describe 'Cursor proxy launch helpers' {
                 $settings = Read-JsonObjectHashtableFromFile -Path (Get-CursorProfileUserSettingsPath -UserDataDir $tempDir)
                 $settings.ContainsKey('http.proxy') | Should Be $false
                 $settings.ContainsKey('http.proxyStrictSSL') | Should Be $false
+                $settings.ContainsKey('http.proxySupport') | Should Be $false
             }
             finally {
                 Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue

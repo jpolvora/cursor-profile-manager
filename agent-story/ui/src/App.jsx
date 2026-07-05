@@ -33,7 +33,8 @@ export default function App() {
   const [methodFilter, setMethodFilter] = useState('ALL');
   const [sidebarRefreshToken, setSidebarRefreshToken] = useState(0);
   const [selectedId, setSelectedId] = useState(null);
-  const [detailExpanded, setDetailExpanded] = useState(true);
+  const [detailExpanded, setDetailExpanded] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
 
   const projects = useProjects(sidebarRefreshToken);
 
@@ -113,8 +114,16 @@ export default function App() {
 
   const handleSelectInteraction = useCallback((id) => {
     setSelectedId(id);
-    setDetailExpanded(true);
   }, []);
+
+  const handleToggleInteractionDetails = useCallback((id) => {
+    if (selectedId === id && detailExpanded) {
+      setDetailExpanded(false);
+    } else {
+      setSelectedId(id);
+      setDetailExpanded(true);
+    }
+  }, [selectedId, detailExpanded]);
 
   const handleProjectFilterChange = useCallback((projectKey) => {
     setActiveProject(projectKey);
@@ -175,6 +184,8 @@ export default function App() {
           onSelectProject={handleSelectProject}
           onSelectSession={handleSelectSession}
           projects={projects}
+          expanded={sidebarExpanded}
+          onToggle={() => setSidebarExpanded(value => !value)}
         />
 
         <div className="workspace">
@@ -209,7 +220,9 @@ export default function App() {
             <InteractionGrid
               interactions={interactions}
               selectedId={selectedId}
+              detailExpanded={detailExpanded}
               onSelect={handleSelectInteraction}
+              onToggleDetails={handleToggleInteractionDetails}
               loading={loading}
               error={error}
               searchTerm={searchTerm}

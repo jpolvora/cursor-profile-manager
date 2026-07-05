@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FolderKanban, ChevronDown, ChevronRight, Monitor } from 'lucide-react';
+import { FolderKanban, ChevronDown, ChevronRight, ChevronLeft, Monitor } from 'lucide-react';
 import { formatLastSeen } from '../utils/interactionUtils';
 
 function shortInstance(key) {
@@ -13,13 +13,15 @@ export default function Sidebar({
   activeInstance,
   onSelectProject,
   onSelectSession,
-  projects = []
+  projects = [],
+  expanded = true,
+  onToggle
 }) {
-  const [expanded, setExpanded] = useState(() => new Set());
+  const [expandedProjects, setExpandedProjects] = useState(() => new Set());
 
   useEffect(() => {
     if (!activeProject) return;
-    setExpanded(prev => {
+    setExpandedProjects(prev => {
       const next = new Set(prev);
       next.add(activeProject);
       return next;
@@ -28,7 +30,7 @@ export default function Sidebar({
 
   const toggleExpanded = (projectKey, event) => {
     event.stopPropagation();
-    setExpanded(prev => {
+    setExpandedProjects(prev => {
       const next = new Set(prev);
       if (next.has(projectKey)) next.delete(projectKey);
       else next.add(projectKey);
@@ -40,82 +42,96 @@ export default function Sidebar({
   const allSelected = activeProject === null && activeInstance === null;
 
   return (
-    <aside className="thread-sidebar project-sidebar">
-      <div className="sidebar-header">
-        <FolderKanban size={16} color="var(--primary-accent)" />
-        <span>Projects</span>
-      </div>
+    <aside className={`thread-sidebar project-sidebar ${expanded ? 'thread-sidebar-open' : 'thread-sidebar-collapsed'}`}>
+      <button
+        type="button"
+        className="thread-sidebar-toggle"
+        onClick={onToggle}
+        title={expanded ? 'Collapse projects' : 'Expand projects'}
+        aria-expanded={expanded}
+      >
+        {expanded ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+      </button>
 
-      <ul className="thread-list project-tree">
-        <li>
-          <button
-            className={`thread-item ${allSelected ? 'active' : ''}`}
-            onClick={() => onSelectProject(null)}
-          >
-            <span className="thread-name">All projects</span>
-            <span className="thread-count">{totalCount}</span>
-          </button>
-        </li>
+      {expanded && (
+        <>
+          <div className="sidebar-header">
+            <FolderKanban size={16} color="var(--primary-accent)" />
+            <span>Projects</span>
+          </div>
 
-        {projects.map(project => {
-          const isExpanded = expanded.has(project.project_key);
-          const projectActive = activeProject === project.project_key && activeInstance === null;
-          const sessions = project.sessions || [];
-
-          return (
-            <li key={project.project_key} className="project-group">
-              <div className={`project-row ${projectActive ? 'active' : ''}`}>
-                <button
-                  type="button"
-                  className="project-expand"
-                  aria-label={isExpanded ? 'Collapse project' : 'Expand project'}
-                  onClick={(event) => toggleExpanded(project.project_key, event)}
-                >
-                  {sessions.length > 0
-                    ? (isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />)
-                    : <span className="project-expand-spacer" />}
-                </button>
-                <button
-                  type="button"
-                  className="project-select"
-                  title={project.project_key === '__unassigned__' ? 'No workspace detected' : project.project_key}
-                  onClick={() => onSelectProject(project.project_key)}
-                >
-                  <span className="thread-name">{project.label}</span>
-                  <span className="project-meta">{formatLastSeen(project.last_timestamp)}</span>
-                  <span className="thread-count">{project.count}</span>
-                </button>
-              </div>
-
-              {isExpanded && sessions.length > 0 && (
-                <ul className="session-list">
-                  {sessions.map(session => {
-                    const sessionActive =
-                      activeProject === project.project_key &&
-                      activeInstance === session.instance_key;
-
-                    return (
-                      <li key={session.instance_key}>
-                        <button
-                          type="button"
-                          className={`session-item ${sessionActive ? 'active' : ''}`}
-                          title={session.instance_key}
-                          onClick={() => onSelectSession(project.project_key, session.instance_key)}
-                        >
-                          <Monitor size={12} />
-                          <span className="session-name">{shortInstance(session.instance_key)}</span>
-                          <span className="session-meta">{formatLastSeen(session.last_timestamp)}</span>
-                          <span className="thread-count">{session.count}</span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+          <ul className="thread-list project-tree">
+            <li>
+              <button
+                className={`thread-item ${allSelected ? 'active' : ''}`}
+                onClick={() => onSelectProject(null)}
+              >
+                <span className="thread-name">All projects</span>
+                <span className="thread-count">{totalCount}</span>
+              </button>
             </li>
-          );
-        })}
-      </ul>
+
+            {projects.map(project => {
+              const isExpanded = expandedProjects.has(project.project_key);
+              const projectActive = activeProject === project.project_key && activeInstance === null;
+              const sessions = project.sessions || [];
+
+              return (
+                <li key={project.project_key} className="project-group">
+                  <div className={`project-row ${projectActive ? 'active' : ''}`}>
+                    <button
+                      type="button"
+                      className="project-expand"
+                      aria-label={isExpanded ? 'Collapse project' : 'Expand project'}
+                      onClick={(event) => toggleExpanded(project.project_key, event)}
+                    >
+                      {sessions.length > 0
+                        ? (isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />)
+                        : <span className="project-expand-spacer" />}
+                    </button>
+                    <button
+                      type="button"
+                      className="project-select"
+                      title={project.project_key === '__unassigned__' ? 'No workspace detected' : project.project_key}
+                      onClick={() => onSelectProject(project.project_key)}
+                    >
+                      <span className="thread-name">{project.label}</span>
+                      <span className="project-meta">{formatLastSeen(project.last_timestamp)}</span>
+                      <span className="thread-count">{project.count}</span>
+                    </button>
+                  </div>
+
+                  {isExpanded && sessions.length > 0 && (
+                    <ul className="session-list">
+                      {sessions.map(session => {
+                        const sessionActive =
+                          activeProject === project.project_key &&
+                          activeInstance === session.instance_key;
+
+                        return (
+                          <li key={session.instance_key}>
+                            <button
+                              type="button"
+                              className={`session-item ${sessionActive ? 'active' : ''}`}
+                              title={session.instance_key}
+                              onClick={() => onSelectSession(project.project_key, session.instance_key)}
+                            >
+                              <Monitor size={12} />
+                              <span className="session-name">{shortInstance(session.instance_key)}</span>
+                              <span className="session-meta">{formatLastSeen(session.last_timestamp)}</span>
+                              <span className="thread-count">{session.count}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
     </aside>
   );
 }

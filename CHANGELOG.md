@@ -6,8 +6,25 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ## 2026-07-05
 
+### Added
+
+- **Clean Agent Story database** — toolbar **Clean DB** stops Agent Story, deletes the local SQLite capture database, and restarts Agent Story if it was running so you can wipe captured traffic and begin fresh.
+- **Agent Story endpoint analysis** — `GET /api/endpoints/summary` and `npm run analyze-endpoints` (in `agent-story/server`) aggregate captured Cursor traffic by host, category, and path; report written to `agent-story/docs/cursor-endpoints-analysis.md`.
+
+### Changed
+
+- **Agent Story dashboard UX** — project lists (sidebar and filter dropdown) sort by most recent captured request; interaction grid columns are resizable with visible dividers; request details panel starts collapsed; projects sidebar can collapse to a narrow strip; grid rows have an expand/collapse chevron and double-click toggles request details; interaction grid uses a styled purple scrollbar.
+- **Proxied launch argv.json** — RunProxied profiles now write `proxy-server`, `proxy-bypass-list`, and `ignore-certificate-errors` to `<user-data-dir>\argv.json` so Electron/Node subprocesses (agent chat, extension host) inherit the MITM proxy; requires a full Cursor restart after toggling.
+- **Proxied launch env** — added `GLOBAL_AGENT_HTTP_PROXY` / `GLOBAL_AGENT_HTTPS_PROXY`; process spawn copies the full environment block via `ProcessStartInfo` so proxy vars reach child processes reliably.
+- **Profile proxy settings** — proxied launches now write `"http.proxySupport": "on"` in the profile `User/settings.json` so extension/agent HTTP clients honor the configured proxy (was `override`).
+
 ### Fixed
 
+- **Agent chat not captured** — agentic chat often bypassed `--proxy-server` on the main process only; argv.json plus extension proxy settings route Node agent traffic through Agent Story.
+- **Agent Story response-end blocking** — `onResponseEnd` no longer runs profile resolution (PowerShell/CIM) before calling the proxy forward callback; fast non-streaming API responses were still stalling the MITM path after the 2.0.12 non-blocking request fix.
+- **Agent Story streaming provisional capture** — provisional DB rows no longer trigger synchronous profile resolution during stream setup.
+- **Agent Story bypass tunnel diagnostics** — unexpected CONNECT bypasses (hosts outside localhost/Git) are logged to the console and recorded in the capture DB so missed agent/chat domains are easier to spot.
+- **Agent Story partial capture on errors** — proxy or persistence failures on in-flight chat/agent streams save partial request/response bodies instead of dropping the interaction entirely.
 - **Agent Story non-blocking capture** — the MITM proxy no longer blocks Cursor agent API requests on profile resolution (PowerShell/CIM lookups) or streaming first-chunk DB writes; traffic forwards immediately while capture runs in the background.
 - **Proxied launch bypass lists** — Chromium now gets `--proxy-bypass-list` and Node subprocesses get an expanded `NO_PROXY` (localhost, Git hosts) so non-AI traffic is not routed through the MITM proxy.
 - **Agent Story binary payload display** — protobuf and other binary request bodies (e.g. telemetry `tev1/v1/rgstr`) no longer render as garbled UTF-8 with replacement characters; embedded ASCII strings are extracted, and opaque binary falls back to base64.

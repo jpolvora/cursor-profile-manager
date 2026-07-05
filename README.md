@@ -88,6 +88,7 @@ Re-run the shortcut installer if you move the folder to automatically repair the
    * Edit a profile and check **Run proxied**.
    * Toggle **Start Agent Story** on the manager toolbar to start the local proxy (port 8080) and dashboard (port 3001/5173).
    * Click **Open dashboard** to launch the React web app (`http://localhost:5173/`).
+   * Click **Clean DB** to wipe the local Agent Story SQLite database (all captured interactions) and restart with a fresh database if Agent Story was running.
    * Start your proxied profile. *Note: Ensure all existing Cursor windows for that profile are closed before launching proxied, as environment variables and settings apply at startup.*
    * Work with Cursor's chat or Cmd+K as usual and watch raw prompts and stream details appear instantly on the dashboard.
 8. **Tray and startup (toolbar):** Enable **Close/minimize to tray** to hide the manager in the notification area when you minimize or click the window close (X) button. Right-click the tray icon for **Show Window** (restore) or **Exit** (fully quit; confirms if the Agent Story proxy is running). Enable **Start with Windows** to launch at sign-in (starts in the tray when close/minimize-to-tray is also enabled). On Windows 11, new tray icons may appear under the **^** overflow chevron first.
@@ -106,9 +107,10 @@ By using separate user-data directories (instead of Cursor's `--profile` flag), 
 
 When a profile is launched with proxying enabled:
 1. **Chromium Proxy:** Appends `--proxy-server`, `--proxy-bypass-list` (localhost + Git hosts), and `--ignore-certificate-errors` so AI traffic is captured while Git and local services bypass the MITM.
-2. **Node Agent Proxy:** Sets `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` (same bypass hosts), and `NODE_TLS_REJECT_UNAUTHORIZED=0` so agent subprocesses route Cursor API calls through Agent Story without blocking on capture work.
-3. **Settings Injection:** Automatically configures `"http.proxy": "http://127.0.0.1:8080"` and `"http.proxyStrictSSL": false` in `<profile-dir>\User\settings.json`.
-4. **PID Grouping:** Writes a temporary `<user-data-dir>\cursor-profile-manager.context.json` file and registers the process PID with Agent Story via `POST /api/profile-sessions/register` so that TCP traffic captured by the proxy maps cleanly to the project name.
+2. **Node Agent Proxy:** Sets `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` (Git + localhost bypass hosts), and `NODE_TLS_REJECT_UNAUTHORIZED=0` so agent subprocesses route Cursor API calls through Agent Story without blocking on capture work (Windows env keys are case-insensitive, so these satisfy Node clients that read lowercase names too).
+3. **Settings Injection:** Automatically configures `"http.proxy"`, `"http.proxyStrictSSL": false`, and `"http.proxySupport": "on"` in `<profile-dir>\User\settings.json`.
+4. **Runtime argv.json:** Writes `proxy-server`, `proxy-bypass-list`, and `ignore-certificate-errors` to `<profile-dir>\argv.json` so all Electron/Node subprocesses (including agent chat) inherit the MITM proxy — **fully quit and relaunch Cursor** after toggling RunProxied so argv.json is picked up.
+5. **PID Grouping:** Writes a temporary `<user-data-dir>\cursor-profile-manager.context.json` file and registers the process PID with Agent Story via `POST /api/profile-sessions/register` so that TCP traffic captured by the proxy maps cleanly to the project name.
 
 Agent Story forwards intercepted Cursor API traffic immediately; capture and profile resolution run in the background so agent chat streams are not delayed.
 

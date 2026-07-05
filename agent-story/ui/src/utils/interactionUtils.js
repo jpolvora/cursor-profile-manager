@@ -127,3 +127,15 @@ export function formatMs(value) {
   if (value == null) return '—';
   return `${value}ms`;
 }
+
+/** Newest request activity first; projects with no timestamp sink to the bottom. */
+export function sortProjectsByRecentActivity(projects) {
+  return [...projects].sort((a, b) => {
+    const ta = a.last_timestamp || '';
+    const tb = b.last_timestamp || '';
+    if (!ta && !tb) return 0;
+    if (!ta) return 1;
+    if (!tb) return -1;
+    return String(tb).localeCompare(String(ta));
+  });
+}

@@ -7,9 +7,9 @@ const {
   bufferToStorage,
   bufferToPlainText,
   decompressBody,
-  decodeConnectBodyToText,
-  shouldCaptureHost
+  decodeConnectBodyToText
 } = require('./capture');
+const { shouldCaptureHost } = require('./endpointAnalysis');
 const zlib = require('zlib');
 
 test('shouldCaptureHost matches cursor and AI domains', () => {

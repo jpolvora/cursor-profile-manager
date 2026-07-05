@@ -89,13 +89,46 @@ h1 {
 
 /* ─── Thread sidebar ─── */
 .thread-sidebar {
-  width: var(--sidebar-width);
+  position: relative;
   flex-shrink: 0;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: width 0.2s ease;
+}
+
+.thread-sidebar-open {
+  width: var(--sidebar-width);
+}
+
+.thread-sidebar-collapsed {
+  width: 2rem;
+}
+
+.thread-sidebar-toggle {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translate(50%, -50%);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 2.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.thread-sidebar-toggle:hover {
+  color: var(--text-main);
+  border-color: rgba(107, 76, 255, 0.45);
 }
 
 .sidebar-section {
@@ -467,6 +500,41 @@ h1 {
   flex: 1;
   overflow: auto;
   min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(107, 76, 255, 0.45) rgba(255, 255, 255, 0.04);
+}
+
+.grid-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.grid-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 999px;
+  margin: 4px;
+}
+
+.grid-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(107, 76, 255, 0.55) 0%, rgba(107, 76, 255, 0.35) 100%);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  transition: background 0.15s ease;
+}
+
+.grid-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(139, 112, 255, 0.85) 0%, rgba(107, 76, 255, 0.65) 100%);
+  background-clip: padding-box;
+}
+
+.grid-scroll::-webkit-scrollbar-thumb:active {
+  background: linear-gradient(180deg, rgba(160, 140, 255, 0.95) 0%, rgba(107, 76, 255, 0.8) 100%);
+  background-clip: padding-box;
+}
+
+.grid-scroll::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .interaction-grid {
@@ -484,6 +552,7 @@ h1 {
 }
 
 .grid-head th {
+  position: relative;
   padding: 0.55rem 0.65rem;
   text-align: left;
   font-size: 0.68rem;
@@ -492,17 +561,35 @@ h1 {
   letter-spacing: 0.06em;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
   white-space: nowrap;
 }
 
-.grid-head th:nth-child(1) { width: 5.5rem; }
-.grid-head th:nth-child(2) { width: 4.5rem; }
-.grid-head th:nth-child(3) { width: auto; }
-.grid-head th:nth-child(4) { width: 4rem; }
-.grid-head th:nth-child(5),
-.grid-head th:nth-child(6),
-.grid-head th:nth-child(8) { width: 4.5rem; }
-.grid-head th:nth-child(7) { width: 7rem; }
+.grid-head th:last-child {
+  border-right: none;
+}
+
+.grid-head-label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grid-col-resizer {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 1;
+}
+
+.grid-col-resizer:hover,
+body.grid-col-resizing .grid-col-resizer {
+  background: rgba(107, 76, 255, 0.35);
+}
 
 .grid-row {
   height: 36px;
@@ -525,10 +612,20 @@ h1 {
 .grid-cell {
   padding: 0 0.65rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-right: 1px solid var(--border-color);
   vertical-align: middle;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.grid-cell:last-child {
+  border-right: none;
+}
+
+body.grid-col-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .grid-cell-url {
@@ -548,6 +645,36 @@ h1 {
 .grid-cell-method,
 .grid-cell-status {
   overflow: visible;
+}
+
+.grid-cell-expand {
+  padding: 0;
+  text-align: center;
+  overflow: visible;
+}
+
+.grid-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin: 0 auto;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+
+.grid-expand-btn:hover {
+  color: var(--text-main);
+  background: rgba(107, 76, 255, 0.12);
+}
+
+.grid-expand-btn.expanded {
+  color: var(--primary-accent);
 }
 
 .grid-spacer td {

@@ -505,21 +505,7 @@ function zlibBrotli(buffer) {
   return zlib.brotliDecompressSync(buffer);
 }
 
-function shouldCaptureHost(host) {
-  const h = String(host || '').toLowerCase();
-  
-  const aiDomains = [
-    'cursor',
-    'openai.com',
-    'anthropic.com',
-    'claude.ai',
-    'google.com', // for gemini
-    'x.ai',
-    'api.mistral.ai'
-  ];
-
-  return aiDomains.some(domain => h.includes(domain));
-}
+const { shouldCaptureHost } = require('./endpointAnalysis');
 
 function buildCaptureRecord(ctx) {
   const host = ctx.clientToProxyRequest.headers.host || '';

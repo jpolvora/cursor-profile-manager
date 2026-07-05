@@ -10,10 +10,12 @@ const {
   getInteractionsByThread,
   getProjects,
   getInstances,
-  getLatestInteractionId
+  getLatestInteractionId,
+  readDb
 } = require('./db');
 const { extractInteractionContext } = require('./metadata');
-const { shouldCaptureHost, buildCaptureRecord, isStreamingContentType, bufferToPlainText, decompressBody } = require('./capture');
+const { buildCaptureRecord, isStreamingContentType, bufferToPlainText, decompressBody } = require('./capture');
+const { shouldCaptureHost, analyzeInteractions } = require('./endpointAnalysis');
 const {
   registerProfileSession,
   unregisterProfileSession,
@@ -58,12 +60,6 @@ function notifyClients(event, data) {
 }
 
 function snapshotCaptureContext(ctx, resChunks) {
-  let profileContext = ctx.profileContext;
-  if (!profileContext) {
-    profileContext = resolveProfileContextForCapture(ctx, PROXY_PORT);
-    ctx.profileContext = profileContext;
-  }
-
   return {
     captureKey: ctx.captureKey,
     provisionalRowId: ctx.provisionalRowId || null,
@@ -71,7 +67,7 @@ function snapshotCaptureContext(ctx, resChunks) {
     firstChunkTime: ctx.firstChunkTime,
     totalResponseBytes: ctx.totalResponseBytes,
     isSSL: ctx.isSSL,
-    profileContext,
+    profileContext: ctx.profileContext || null,
     reqBody: ctx.reqBody ? Buffer.from(ctx.reqBody) : Buffer.alloc(0),
     resBody: Buffer.concat(resChunks),
     method: ctx.clientToProxyRequest.method,
@@ -164,7 +160,7 @@ function persistCaptureRecord(snapshot) {
 function insertProvisionalStreamingCapture(ctx, host) {
   if (ctx.provisionalRowId) return;
 
-  const profileContext = ctx.profileContext || resolveProfileContextForCapture(ctx, PROXY_PORT);
+  const profileContext = ctx.profileContext || null;
   const urlStr = (ctx.isSSL ? 'https://' : 'http://') + host + (ctx.clientToProxyRequest.url || '');
   const reqRaw = decompressBody(ctx.reqBody || Buffer.alloc(0), ctx.clientToProxyRequest.headers['content-encoding']);
   const requestBody = bufferToPlainText(reqRaw, ctx.clientToProxyRequest.headers['content-type']);
@@ -288,6 +284,23 @@ app.get('/api/instances', (req, res) => {
   }
 });
 
+app.get('/api/endpoints/summary', (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 5000, 10000);
+    const rows = readDb.prepare(`
+      SELECT method, url, response_status,
+        length(request_body) AS req_len,
+        length(response_body) AS res_len
+      FROM interactions
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(limit);
+    res.json(analyzeInteractions(rows));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/interactions/search', (req, res) => {
   const filters = parseInteractionFilters(req.query);
   const parsedLimit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
@@ -330,8 +343,135 @@ app.delete('/api/profile-sessions/:profileId', (req, res) => {
 
 const PROXY_PORT = 8080;
 
+const EXPECTED_BYPASS_HOST_SUFFIXES = [
+  'localhost',
+  '127.0.0.1',
+  'github.com',
+  'gitlab.com',
+  'bitbucket.org'
+];
+
+function isExpectedBypassHost(host) {
+  const h = String(host || '').toLowerCase();
+  if (!h) return true;
+  return EXPECTED_BYPASS_HOST_SUFFIXES.some((suffix) => h === suffix || h.endsWith('.' + suffix));
+}
+
+function logBypassTunnelConnect(host, port) {
+  const target = `${host}:${port}`;
+  const expected = isExpectedBypassHost(host);
+  console.log(`[Bypass] CONNECT ${target}${expected ? ' (expected)' : ' (unexpected — not MITM)'}`);
+
+  if (expected) {
+    return;
+  }
+
+  setImmediate(() => {
+    try {
+      insertInteraction({
+        method: 'CONNECT',
+        url: `tunnel://${target}`,
+        request_headers: '{}',
+        request_body: '',
+        response_status: 0,
+        response_headers: '{}',
+        response_body: '',
+        project_key: null,
+        instance_key: null,
+        metadata: JSON.stringify({
+          capture_kind: 'bypass_tunnel',
+          host,
+          port: Number(port) || port,
+          unexpected: true
+        })
+      });
+    } catch (err) {
+      console.error('Bypass tunnel log error:', err);
+    }
+  });
+}
+
+function persistPartialCapture(ctx, resChunks, reason, err) {
+  const host = ctx?.clientToProxyRequest?.headers?.host || '';
+  if (!host || !shouldCaptureHost(host)) {
+    return;
+  }
+
+  setImmediate(() => {
+    try {
+      if (!ctx.profileContext) {
+        ctx.profileContext = resolveProfileContextForCapture(ctx, PROXY_PORT);
+      }
+      const snapshot = snapshotCaptureContext(ctx, resChunks || []);
+      const record = buildCaptureRecordFromSnapshot(snapshot);
+      const durationMs = Date.now() - (snapshot.requestStartTime || Date.now());
+      const profileContext = snapshot.profileContext;
+      const context = extractInteractionContext(
+        snapshot.reqHeaders,
+        record.request_body,
+        {
+          duration_ms: durationMs,
+          response_status: record.response_status,
+          host: snapshot.host,
+          capture: record.capture,
+          profileContext
+        }
+      );
+
+      let metadata = {};
+      try {
+        metadata = JSON.parse(context.metadata);
+      } catch {
+        metadata = {};
+      }
+      metadata.capture_kind = 'partial';
+      metadata.capture_reason = reason;
+      if (err && err.message) {
+        metadata.error_message = String(err.message);
+      }
+
+      const rowPayload = {
+        method: record.method,
+        url: record.url,
+        request_headers: record.request_headers,
+        request_body: record.request_body,
+        response_status: record.response_status || 0,
+        response_headers: record.response_headers,
+        response_body: record.response_body,
+        project_key: context.project_key,
+        instance_key: context.instance_key,
+        metadata: JSON.stringify(metadata)
+      };
+
+      let rowId = snapshot.provisionalRowId;
+      if (rowId) {
+        updateInteraction.run({ ...rowPayload, id: rowId });
+      } else {
+        const result = insertInteraction(rowPayload);
+        rowId = Number(result.lastInsertRowid);
+      }
+
+      notifyClients('interaction', {
+        id: rowId,
+        project_key: context.project_key,
+        instance_key: context.instance_key,
+        capture_key: snapshot.captureKey,
+        partial: true,
+        capture_reason: reason
+      });
+
+      console.log(`[Proxy] #${rowId} partial ${record.method} ${record.url} (${reason})`);
+    } catch (persistErr) {
+      console.error('Partial capture error:', persistErr);
+    }
+  });
+}
+
 proxy.onError(function(ctx, err) {
   console.error('Proxy Error:', err);
+  if (ctx) {
+    persistPartialCapture(ctx, ctx._captureResChunks || [], 'proxy_error', err);
+  }
   if (err && err.code === 'EADDRINUSE') {
     process.exit(1);
   }
@@ -345,6 +485,8 @@ proxy.onConnect(function(req, socket, head, callback) {
   if (shouldCaptureHost(host)) {
     return callback(); // continue to MITM
   }
+
+  logBypassTunnelConnect(host, port);
 
   // Bypass MITM (direct tunnel) for non-captured hosts (e.g. github.com)
   const net = require('net');
@@ -384,6 +526,7 @@ proxy.onRequest(function(ctx, callback) {
   });
 
   const resChunks = [];
+  ctx._captureResChunks = resChunks;
   ctx.onResponseData(function(ctx, chunk, callback) {
     resChunks.push(chunk);
 
@@ -420,14 +563,18 @@ proxy.onRequest(function(ctx, callback) {
   });
 
   ctx.onResponseEnd(function(ctx, callback) {
-    const snapshot = snapshotCaptureContext(ctx, resChunks);
     callback();
 
     setImmediate(() => {
       try {
+        if (!ctx.profileContext) {
+          ctx.profileContext = resolveProfileContextForCapture(ctx, PROXY_PORT);
+        }
+        const snapshot = snapshotCaptureContext(ctx, resChunks);
         persistCaptureRecord(snapshot);
       } catch (err) {
         console.error('Capture Error:', err);
+        persistPartialCapture(ctx, resChunks, 'capture_error', err);
       }
     });
   });
