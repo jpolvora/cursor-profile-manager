@@ -44,7 +44,7 @@ Hard-won failures from past sessions. **Read this section before writing or chan
 
 ### Win32 interop
 
-- Load **`Initialize-Win32AppFocus`** at **normal startup**, not only in the second-instance code path — otherwise Focus/foreground APIs are undefined on first launch.
+- Load **`Initialize-Win32AppFocus`** at **normal startup** — Focus/foreground Win32 APIs are used to focus profile instances.
 - Extend the existing guarded `Add-Type` block; do not duplicate Win32 types.
 
 ### Verification
@@ -67,6 +67,7 @@ When a new bug is fixed, **append a row or bullet here** (and add a **Fixed** ch
 | `README.md` | User docs — keep in sync with behavior. |
 | `CHANGELOG.md` | User-facing history of features added, changed, or removed. |
 | `AGENTS.md` | This file — architecture, contracts, PowerShell conventions. |
+| `agent-story/` | Embedded Node/React proxy and visualization dashboard codebase. |
 
 ## Runtime layout (outside repo)
 
@@ -81,8 +82,8 @@ Override with `CURSOR_PROFILES_DIR`. Override binary with `CURSOR_BIN`.
 The main script carries a release marker used by **Check for updates**, the **window title**, and the footer version label:
 
 ```powershell
-# App-Version: 2.0.0
-$script:AppVersionId = '2.0.0'
+# App-Version: 2.0.7
+$script:AppVersionId = '2.0.7'
 $script:AppDisplayName = 'Cursor Profile Manager'
 ```
 
@@ -92,8 +93,8 @@ $script:AppDisplayName = 'Cursor Profile Manager'
 |--------|---------|----------|
 | `Get-AppVersionId` | `$script:AppVersionId` | update check, tests |
 | `Get-AppDisplayName` | `$script:AppDisplayName` | title base name |
-| `Get-AppVersionLabel` | `v2.0.0` (or `''` when unset) | footer link prefix |
-| `Get-AppWindowTitle` | `Cursor Profile Manager v2.0.0` | `$form.Text`, error dialogs |
+| `Get-AppVersionLabel` | `v2.0.7` (or `''` when unset) | footer link prefix |
+| `Get-AppWindowTitle` | `Cursor Profile Manager v2.0.7` | `$form.Text`, error dialogs |
 
 Rules:
 
@@ -151,6 +152,7 @@ Key modules inside the script:
 | Grid view sync | `Apply-GridModelToView`, `Sync-GridRowToView` | In-place cell updates |
 | Notifications | *(removed)* | Was tray balloon on instance count change |
 | Process events | `Start-CursorProcessWatchers`, `Request-DeferredGridRefresh` | WMI + debounce timer |
+| Agent Story | `Find-AgentStoryRoot`, `Test-TcpPortInUse`, `Get-AgentStoryBlockedPorts`, `Test-AgentStoryProcessAlive`, `Test-AgentStoryServicePortListening`, `Resolve-AgentStoryRunState`, `Test-AgentStoryAnyRunning`, `Test-AgentStoryProxyRunning`, `Start-AgentStoryProxy`, `Stop-AgentStory`, `Open-AgentStoryDashboard`, `Update-AgentStoryUiState` | Manages backend proxy and React dashboard daemon processes, checks port bindings, and updates toolbar UI state |
 
 **Do not** call `$grid.Rows.Clear()` on periodic refresh — update the model, diff, then patch rows.
 

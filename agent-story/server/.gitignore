@@ -1,1 +1,5 @@
 node_modules/
+agent-story.db
+agent-story.db-wal
+agent-story.db-shm
+.http-mitm-proxy/

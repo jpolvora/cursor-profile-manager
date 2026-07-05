@@ -14,6 +14,7 @@ const registryByMainPid = new Map();
 const sessionCache = new Map();
 
 let clientPidCache = new Map();
+const CLIENT_PID_CACHE_MAX = 500;
 let clientPortMapCache = { at: 0, port: DEFAULT_PROXY_PORT, map: new Map() };
 
 function refreshClientPortMap(proxyPort = DEFAULT_PROXY_PORT) {
@@ -129,11 +130,39 @@ function registerProfileSession(payload) {
   }
 
   const key = normalizeUserDataDir(context.user_data_dir);
+  const previous = registryByUserDataDir.get(key);
+  if (previous?.main_process_id && previous.main_process_id !== context.main_process_id) {
+    registryByMainPid.delete(previous.main_process_id);
+  }
+
   registryByUserDataDir.set(key, context);
   if (context.main_process_id) {
     registryByMainPid.set(context.main_process_id, key);
   }
   return context;
+}
+
+function lookupProfileContextByMainPid(mainProcessId) {
+  const pid = Number(mainProcessId);
+  if (!Number.isFinite(pid) || pid <= 0) return null;
+
+  const key = registryByMainPid.get(pid);
+  if (!key) return null;
+
+  const registered = registryByUserDataDir.get(key);
+  if (!registered) return null;
+
+  return { ...registered, source: 'registry' };
+}
+
+function setClientPidCacheEntry(cacheKey, pid) {
+  if (clientPidCache.size >= CLIENT_PID_CACHE_MAX) {
+    const oldestKey = clientPidCache.keys().next().value;
+    if (oldestKey != null) {
+      clientPidCache.delete(oldestKey);
+    }
+  }
+  clientPidCache.set(cacheKey, { at: Date.now(), pid });
 }
 
 function unregisterProfileSession(profileId) {
@@ -214,7 +243,7 @@ function resolveClientProcessId(clientRemotePort, proxyPort = DEFAULT_PROXY_PORT
   }
 
   if (pid) {
-    clientPidCache.set(cacheKey, { at: Date.now(), pid });
+    setClientPidCacheEntry(cacheKey, pid);
   }
   return pid;
 }
@@ -400,6 +429,7 @@ module.exports = {
   listProfileSessions,
   readProfileMarker,
   lookupProfileContextByUserDataDir,
+  lookupProfileContextByMainPid,
   parseUserDataDirFromCommandLine,
   resolveProfileContextFromClientSocket,
   resolveProfileContextForCapture,

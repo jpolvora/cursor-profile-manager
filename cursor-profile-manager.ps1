@@ -18,8 +18,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 2.0.6
-$script:AppVersionId = '2.0.6'
+# App-Version: 2.0.7
+$script:AppVersionId = '2.0.7'
 $script:AppDisplayName = 'Cursor Profile Manager'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
@@ -1369,11 +1369,12 @@ function Start-CursorProfileProcess {
         [Parameter(Mandatory)][string]$ExecutablePath,
         [Parameter(Mandatory)][string[]]$ArgumentList,
         [hashtable]$Environment = @{},
-        [Parameter(Mandatory)][PSCustomObject]$Profile
+        [Parameter(Mandatory)][PSCustomObject]$Profile,
+        [bool]$RegisterProfile = $true
     )
 
     $proc = Invoke-ProcessWithEnvironment -FilePath $ExecutablePath -ArgumentList $ArgumentList -Environment $Environment -PassThru
-    if ($proc -and -not $proc.HasExited) {
+    if ($RegisterProfile -and $proc -and -not $proc.HasExited) {
         Write-CursorProfileContextMarker -Profile $Profile -MainProcessId $proc.Id
         Register-CursorProfileWithAgentStory -Profile $Profile -MainProcessId $proc.Id
     }
@@ -1442,6 +1443,30 @@ function Update-CursorProfileProxySettings {
     }
 
     $settingsPath = Get-CursorProfileUserSettingsPath -UserDataDir $UserDataDir
+
+    if (-not (Test-Path $settingsPath)) {
+        if (-not $EnableProxy) {
+            return
+        }
+
+        Write-JsonObjectHashtableToFile -Path $settingsPath -Data @{
+            'http.proxy'           = Get-CursorProxyUrl
+            'http.proxyStrictSSL'  = $false
+        }
+        return
+    }
+
+    try {
+        $raw = Get-Content -Raw -Path $settingsPath -Encoding UTF8 -ErrorAction Stop
+        if (-not [string]::IsNullOrWhiteSpace($raw)) {
+            $null = $raw | ConvertFrom-Json -ErrorAction Stop
+        }
+    }
+    catch {
+        Write-Warning "Skipping proxy settings update for $settingsPath : settings.json is not valid JSON ($($_.Exception.Message))"
+        return
+    }
+
     $settings = Read-JsonObjectHashtableFromFile -Path $settingsPath
 
     if ($EnableProxy) {
@@ -2602,7 +2627,6 @@ function Start-CursorProfileInstance {
         (Get-CursorProfileIdentityEnvironmentVariables -Profile $Profile),
         $proxyEnv
     )
-    Write-CursorProfileContextMarker -Profile $Profile
 
     $instanceCounts = Get-UserDataDirInstanceCounts
     $runningCount = Get-ProfileInstanceCount -UserDataDir $Profile.UserDataDir -InstanceCounts $instanceCounts
@@ -2612,7 +2636,7 @@ function Start-CursorProfileInstance {
     if ($runningCount -gt 0 -and $projectExists) {
         Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList (@("--user-data-dir=$($Profile.UserDataDir)", '--new-window') + $extraArgs) -Environment $launchEnv -Profile $Profile | Out-Null
         Start-Sleep -Milliseconds 800
-        Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList (@("--user-data-dir=$($Profile.UserDataDir)", '--add', $Profile.ProjectPath) + $extraArgs) -Environment $launchEnv -Profile $Profile | Out-Null
+        Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList (@("--user-data-dir=$($Profile.UserDataDir)", '--add', $Profile.ProjectPath) + $extraArgs) -Environment $launchEnv -Profile $Profile -RegisterProfile:$false | Out-Null
         return
     }
 

@@ -7,6 +7,7 @@ const {
   buildProfileContext,
   registerProfileSession,
   lookupProfileContextByUserDataDir,
+  lookupProfileContextByMainPid,
   parseUserDataDirFromCommandLine,
   clearProfileSessionCaches,
   readProfileMarker,
@@ -96,6 +97,26 @@ test('readProfileMarker strips UTF-8 BOM written by PowerShell', () => {
   finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test('registerProfileSession replaces stale main-process mapping', () => {
+  clearProfileSessionCaches();
+
+  const payload = {
+    profileId: 'pid-1',
+    profileName: 'Demo',
+    userDataDir: 'D:/cursor/work',
+    projectPath: 'L:/source/demo-app'
+  };
+
+  registerProfileSession({ ...payload, mainProcessId: 1111 });
+  assert.equal(lookupProfileContextByMainPid(1111)?.profile_id, 'pid-1');
+
+  registerProfileSession({ ...payload, mainProcessId: 2222 });
+  assert.equal(lookupProfileContextByMainPid(1111), null);
+  assert.equal(lookupProfileContextByMainPid(2222)?.profile_id, 'pid-1');
+
+  clearProfileSessionCaches();
 });
 
 test('extractInteractionContext prefers registered project over empty body', () => {

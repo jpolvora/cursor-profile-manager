@@ -50,11 +50,19 @@ export default function InteractionGrid({
   onSelect,
   loading,
   error,
-  searchTerm
+  searchTerm,
+  resetScrollKey
 }) {
   const scrollRef = useRef(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(480);
+
+  useEffect(() => {
+    setScrollTop(0);
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+    }
+  }, [resetScrollKey]);
 
   const onScroll = useCallback(() => {
     if (scrollRef.current) {

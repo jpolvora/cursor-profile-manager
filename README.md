@@ -1,14 +1,19 @@
 # Cursor Profile Manager
 
-A Windows GUI to run **multiple Cursor IDE instances** on the same codebase — each with its own user-data directory, login, extensions, settings, and AI chat history.
+[![OS: Windows](https://img.shields.io/badge/OS-Windows-blue?logo=windows)](https://www.microsoft.com/windows)
+[![PowerShell: 5.1+](https://img.shields.io/badge/PowerShell-5.1%2B-blue?logo=powershell)](https://github.com/PowerShell/PowerShell)
+[![Cursor: 3.9+](https://img.shields.io/badge/Cursor-3.9%2B-cyan)](https://cursor.sh)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Tested with **Cursor 3.9+** (uses `--user-data-dir`; the legacy `--max-memory` flag was removed in current builds).
+A lightweight Windows GUI utility to manage and launch **multiple isolated Cursor IDE instances** on the same codebase. Each profile uses its own user-data directory, maintaining separate login sessions, extensions, settings, and AI chat history.
+
+Version 2.0+ introduces native integration with **Agent Story**, a local MITM proxy and React dashboard to monitor, record, and inspect all Cursor AI requests, prompts, and streaming LLM payloads.
 
 ## Overview
 
-Each profile gets its own folder under `%USERPROFILE%\.cursor-profiles\` (override with `CURSOR_PROFILES_DIR`). That lets several Cursor windows open the **same project** at once without sharing account, extensions, or chat history.
+Each profile gets its own folder under `%USERPROFILE%\.cursor-profiles\` (override with `CURSOR_PROFILES_DIR`). That lets several Cursor windows open the **same project** at once without sharing account credentials, extensions, or chat history.
 
-The Profile Manager window title is built dynamically as **Cursor Profile Manager v*version*** (via `Get-AppWindowTitle`) so it is distinct from a Cursor IDE window editing this repo. **Multiple manager windows** may run at once — each launch opens a new instance.
+The Profile Manager window title is built dynamically as **Cursor Profile Manager v*version*** so it is distinct from a Cursor IDE window editing this repo. **Multiple manager windows** may run at once — each launch opens a new instance.
 
 ## Screenshots
 
@@ -32,13 +37,15 @@ Footer **Check for updates** compares your local `# App-Version` marker with Git
 
 ## Benefits
 
-- **Multiple Cursors on one codebase** — parallel work in separate windows
-- **Separate accounts** — work vs. personal, or different clients (sign in once per profile)
-- **Custom user-data dirs** — pick any folder per profile
-- **Parallel AI assistance** — independent agent/chat context per instance
-- **Multiple windows per profile** — start the same profile more than once when needed
+- **Multiple Cursors on one codebase** — parallel work in separate windows.
+- **Separate accounts** — work vs. personal, or different clients (sign in once per profile).
+- **Custom user-data dirs** — pick any folder per profile.
+- **Parallel AI assistance** — independent agent/chat context per instance.
+- **Multiple windows per profile** — start the same profile more than once when needed.
 
 ## Quick start
+
+Clone this repository and run the PowerShell script:
 
 ```powershell
 .\cursor-profile-manager.ps1
@@ -46,180 +53,135 @@ Footer **Check for updates** compares your local `# App-Version` marker with Git
 
 Or double-click `cursor-profile-manager.bat`.
 
-**Desktop shortcut** (Cursor icon, no console window):
-
+**Desktop Shortcut** (launches with the Cursor icon, hiding the background console):
 ```powershell
 .\install-desktop-shortcut.ps1
 ```
 
-Re-run after moving this folder to repair the shortcut.
+Re-run the shortcut installer if you move the folder to automatically repair the path.
 
 ## Features
 
 | Feature | Description |
-|---------|-------------|
-| **Profile CRUD** | Add profiles from the toolbar; edit and delete per row in the **Actions** column |
-| **Actions column** | Per-row buttons: **Start ▶**, **Focus**, **Close**, **Folder**, **Edit**, **Del** (Start disabled when Cursor is not installed; Focus/Close when Instances = 0) |
-| **Double-click row** | Same as **Start** in the Actions column |
-| **Status column** | `● Running` / `○ Idle` from live `Cursor.exe` process inspection |
-| **Instances column** | Count of running windows per profile (0, 1, 2, …) |
-| **Grid columns** | Name, User Data Dir, Instances, Status, Proxy, Notes, Actions (default project folder is edited in Add/Edit only) |
-| **Agent Story** | **Start / Stop Agent Story** toggle on the toolbar; **Open dashboard** link (default browser → `http://localhost:5173/`) when the UI is running. Proxied profiles route traffic through the proxy |
-| **Live updates** | WMI process create/exit events + 2 s fallback poll; grid updates only when data changes |
-| **Multiple manager windows** | Each launch opens a new manager instance (no singleton lock) |
-| **Persistence** | Profiles saved to `profiles.json` in the profiles directory |
-| **Theme** | Light, dark, or **System default** (follows Windows app theme); bottom-toolbar dropdown; saved in `settings.json` |
-| **Check for updates** | Footer link (with current `v#.#.#` beside it) compares `App-Version` markers against GitHub `master` and overwrites the install folder in place (`.bat` and Desktop shortcuts keep working) |
-| **Cursor dependency** | Footer shows Cursor IDE version and CLI status; **Install Cursor** dialog when missing; Add and row **Start** blocked until IDE is detected |
-| **Safe delete** | Optional data-folder removal; blocked while any instance is running |
+|:---|:---|
+| **Isolated Profiles** | Add, edit, and delete profiles. Each profile runs with its own `--user-data-dir` (fully isolating extensions, themes, login sessions, and chat logs). |
+| **Agent Story Integration (v2)** | Capture and inspect Cursor AI traffic (system prompts, user questions, tool calls, and streaming responses) with an embedded MITM proxy and React dashboard. |
+| **Automatic Routing** | Proxied profiles automatically configure Chromium arguments, Node.js proxy environment variables, and `settings.json` HTTP proxy values. |
+| **Project Context Mapping** | Writes a startup context marker (`cursor-profile-manager.context.json`) and registers the process PID with Agent Story to map TCP request sessions to the correct project workspace (avoids `Unassigned` telemetry). |
+| **Live Process Tracking** | Monitors running instances using Windows WMI process start/exit events and a 2-second fallback timer. Shows live window count and active status in the grid. |
+| **Parallel Execution** | Start multiple instances/windows for the same profile or run multiple different profiles concurrently on the same project folders. |
+| **Theme Customization** | Light mode, Dark mode, or **System default** (dynamically tracks Windows color customization settings via registry changes). |
+| **In-App Auto-Updates** | One-click footer button comparing local code version markers against GitHub `master`. Updates all local script assets in-place on confirmation. |
+| **Cursor Installer Helper** | Checks for Cursor installation path and CLI executable on `PATH`. Prompts to download and install if missing. |
+| **Safe Deletion** | Prevents folder deletion if any window for the profile is still active. |
 
 ## Usage
 
-1. Open the Profile Manager.
-2. Add a profile (name auto-suggests a folder under `.cursor-profiles\`).
-3. Optionally set a default project folder (leave blank to open with no folder on Start).
-4. Click **Start ▶** in a row's Actions column (or double-click the row) — Cursor opens with `--user-data-dir` and `--new-window`.
-5. Click **Start ▶** again on the same row to open another window for that profile.
-6. Use other Actions: **Focus** / **Close** (when running), **Folder**, **Edit**, or **Del**.
-7. On first launch, sign in with the account for that profile; settings and extensions persist there.
-8. To inspect Cursor AI traffic, check the **Run proxied** option in the profile's Add/Edit dialog. Toggle **Start Agent Story** / **Stop Agent Story** on the toolbar, then click **Open dashboard** when the UI is running (or browse to `http://localhost:5173/`). Start your proxied profile — you'll be prompted to start the proxy if port 8080 isn't listening. **Fully quit** any existing Cursor windows for that profile before starting proxied — proxy settings apply at launch only.
-
-Proxied profiles route traffic two ways:
-
-- **Chromium** (telemetry, auth, updates): `--proxy-server` + `--ignore-certificate-errors`
-- **Node agent subprocesses** (Agent panel LLM traffic on `agent.api5.cursor.sh`): `HTTP_PROXY` / `HTTPS_PROXY` env vars, `http.proxy` in the profile's `User/settings.json`, and `NODE_TLS_REJECT_UNAUTHORIZED=0` for the MITM self-signed cert
-
-On every **Start**, the manager also writes `<user-data-dir>\cursor-profile-manager.context.json` (profile id, name, project path, main PID) and registers with Agent Story so proxied requests group under the correct project instead of **Unassigned**.
+1. **Launch the Manager:** Run `cursor-profile-manager.ps1` or use the Desktop shortcut.
+2. **Add a Profile:** Click the **Add Profile** button in the toolbar. It automatically suggests isolated folders under `%USERPROFILE%\.cursor-profiles\`.
+3. **Configure Defaults:** Optionally choose a default project directory (Cursor will open this workspace on startup).
+4. **Launch Cursor:** Click **Start ▶** (or double-click the row). This spawns Cursor with `--user-data-dir` pointing to your profile folder.
+5. **Multiple Windows:** Click **Start ▶** again on the same running profile to open additional windows sharing that profile's session and extensions.
+6. **Actions:** Use **Focus** to bring the active windows to the front, **Close** to terminate all instances of a profile, **Folder** to open the user-data directory in File Explorer, and **Edit** / **Del** to modify profile info.
+7. **Trace AI Interactions (v2):**
+   * Edit a profile and check **Run proxied**.
+   * Toggle **Start Agent Story** on the manager toolbar to start the local proxy (port 8080) and dashboard (port 3001/5173).
+   * Click **Open dashboard** to launch the React web app (`http://localhost:5173/`).
+   * Start your proxied profile. *Note: Ensure all existing Cursor windows for that profile are closed before launching proxied, as environment variables and settings apply at startup.*
+   * Work with Cursor's chat or Cmd+K as usual and watch raw prompts and stream details appear instantly on the dashboard.
 
 ## Technical details
 
 ### How it works
 
+Behind the scenes, the manager invokes:
 ```text
 Cursor.exe --user-data-dir "<profile-dir>" --new-window [project-path]
 ```
+By using separate user-data directories (instead of Cursor's `--profile` flag), all configurations, caches, extensions, and OAuth credentials remain completely independent.
 
-Each profile keeps its own extensions, window layout, session history, and login.
+### Network Proxy Mechanism
 
-This tool uses **separate `--user-data-dir` folders**, not Cursor 3.x's built-in `--profile` flag, so login and on-disk data stay fully isolated.
+When a profile is launched with proxying enabled:
+1. **Chromium Proxy:** Appends `--proxy-server="http://127.0.0.1:8080"` and `--ignore-certificate-errors` flags to route web-based telemetry, authentication, and updates.
+2. **Node Agent Proxy:** Sets `HTTP_PROXY="http://127.0.0.1:8080"`, `HTTPS_PROXY="http://127.0.0.1:8080"`, and `NODE_TLS_REJECT_UNAUTHORIZED=0` environment variables.
+3. **Settings Injection:** Automatically configures `"http.proxy": "http://127.0.0.1:8080"` and `"http.proxyStrictSSL": false` in `<profile-dir>\User\settings.json`.
+4. **PID Grouping:** Writes a temporary `<user-data-dir>\cursor-profile-manager.context.json` file and registers the process PID with Agent Story via `POST /api/profile-sessions/register` so that TCP traffic captured by the proxy maps cleanly to the project name.
 
-### Runtime detection
+### Runtime Detection
 
-Running profiles are detected by parsing `Cursor.exe` command lines for `--user-data-dir`. The **Instances** count is the number of **`--type=renderer`** processes for that profile (one per window). Electron uses a single main process per profile; counting only that process always showed `1` while running. Helper processes (`gpu`, `utility`, etc.) are excluded.
-
-When a profile is **already running** and has a default project folder, **Start** opens an empty `--new-window` and then `--add`s the folder. Cursor reuses the existing window if you pass the same folder in one launch, even with `--new-window`.
-
-Status refresh uses:
-
-1. **WMI** — `__InstanceCreationEvent` / `__InstanceDeletionEvent` on `Cursor.exe` (debounced ~500 ms)
-2. **Fallback timer** — poll every 2 s if an event is missed
-
-The UI grid is driven by an in-memory model; the grid is touched only when that model changes (no full redraw on idle polls).
+Profiles are scanned by looking at active `Cursor.exe` command lines via CIM `Win32_Process`.
+* **Instances count** is the number of **`--type=renderer`** processes associated with that user-data directory.
+* UI refreshes are triggered by WMI process creation/deletion events (debounced to 500 ms) and a 2-second fallback timer.
 
 ### Environment variables
 
 | Variable | Description |
-|----------|-------------|
-| `CURSOR_PROFILES_DIR` | Root for profile folders and `profiles.json` |
-| `CURSOR_BIN` | Path to `Cursor.exe` (auto-detected if unset) |
-| `AGENT_STORY_DIR` | Path to the `agent-story` folder (default: `agent-story\` under the manager install folder) |
-| `AGENT_STORY_UI_URL` | Agent Story dashboard URL for **Open dashboard** (default: `http://localhost:5173/`) |
-| `AGENT_STORY_PROXY_URL` | MITM proxy URL for proxied profile launches (default: `http://127.0.0.1:8080`) |
+|:---|:---|
+| `CURSOR_PROFILES_DIR` | Root folder for profile subdirectories and the manager metadata (`profiles.json`, `settings.json`). |
+| `CURSOR_BIN` | Custom path to the `Cursor.exe` binary (otherwise auto-detected). |
+| `AGENT_STORY_DIR` | Path to the Agent Story installation folder (defaults to `agent-story\` under the script directory). |
+| `AGENT_STORY_UI_URL` | Web dashboard URL (default: `http://localhost:5173/`). |
+| `AGENT_STORY_PROXY_URL` | MITM proxy listener address (default: `http://127.0.0.1:8080`). |
 
-Cursor IDE is auto-detected under `%LOCALAPPDATA%\Programs\cursor\` (or `Cursor\`), then `cursor` on PATH. The footer shows the detected version; the **cursor** CLI is checked on PATH or beside the IDE install. Use **Install Cursor** in the footer if neither is found.
+### Storage Schema
 
-### `profiles.json`
-
-Stored at `<CURSOR_PROFILES_DIR>\profiles.json`:
-
+#### `profiles.json`
+Saved under `<CURSOR_PROFILES_DIR>\profiles.json` (encoded in UTF-8):
 ```json
 [
   {
-    "Id": "f3b1...-guid",
-    "Name": "Work",
-    "UserDataDir": "C:\\Users\\you\\.cursor-profiles\\Work",
-    "ProjectPath": "L:\\source\\work-app",
-    "Notes": "Client account",
+    "Id": "f3b18dfa-bbcc-4abc-8def-1234567890ab",
+    "Name": "Work-ClientA",
+    "UserDataDir": "C:\\Users\\Username\\.cursor-profiles\\Work-ClientA",
+    "ProjectPath": "L:\\source\\workspace-a",
+    "Notes": "Dedicated work profile for Client A",
     "RunProxied": true,
     "CreatedAt": "2026-06-30T12:00:00"
   }
 ]
 ```
 
-Editable by hand; safe to back up or sync across machines. Read/write uses **UTF-8**.
-
-### `settings.json`
-
-Stored at `<CURSOR_PROFILES_DIR>\settings.json` (manager UI preferences, separate from Cursor profile data):
-
+#### `settings.json`
+Saved under `<CURSOR_PROFILES_DIR>\settings.json`:
 ```json
 {
   "Theme": "default"
 }
 ```
-
-| `Theme` value | Behavior |
-|---------------|----------|
-| `default` | Match Windows **Settings → Personalization → Colors → Choose your mode** (app theme via `AppsUseLightTheme` registry key); updates while the manager is open |
-| `light` | Always use the light palette |
-| `dark` | Always use the dark palette |
-
-Use the **Theme** dropdown in the toolbar to change this; the choice is saved automatically.
-
-### Updates
-
-Click **Check for updates** in the footer status bar. The manager reads the `# App-Version` marker from your local `cursor-profile-manager.ps1` and from GitHub `master`, then:
-
-| Situation | Result |
-|-----------|--------|
-| Missing version marker (local or GitHub) | Treated as outdated — update offered |
-| GitHub version **greater** than local | Update offered |
-| Same version | “No updates”; optional **force reinstall** with confirmation |
-| Local version **greater** than GitHub | “No updates”; optional **force reinstall** with confirmation |
-
-On apply, it downloads `cursor-profile-manager.ps1`, `cursor-profile-manager.bat`, and `install-desktop-shortcut.ps1`, replaces them in the folder you launched from, then restarts. Existing `.bat` launchers and Desktop shortcuts keep working.
-
-Current release marker in the main script: `# App-Version: 2.0.0` / `$script:AppVersionId` (window title and footer derive from these via `Get-AppWindowTitle` / `Get-AppVersionLabel`).
+* `default`: Dynamically matches the Windows light/dark theme preference.
+* `light` / `dark`: Locks the interface to light/dark color schemes.
 
 ## Unit tests
 
-Requires [Pester](https://pester.dev/) 3.x or later (often preinstalled on Windows). From the repo root:
-
+Requires [Pester](https://pester.dev/) 3.x or later. Run from the repo root:
 ```powershell
 .\run-tests.ps1
 ```
+Tests are isolated and run in a temporary sandbox directory, protecting your active profiles and configuration settings.
 
-Tests use a temporary profiles directory — your real `~/.cursor-profiles` data is not touched.
+## Project Structure
 
-### Manual launch (without the GUI)
+| File / Folder | Description |
+|:---|:---|
+| [cursor-profile-manager.ps1](file:///L:/source/cursor-profile-manager/cursor-profile-manager.ps1) | The main application GUI written in PowerShell and WinForms. |
+| [cursor-profile-manager.bat](file:///L:/source/cursor-profile-manager/cursor-profile-manager.bat) | Silent launcher wrapper that boots the GUI without showing a console window. |
+| [install-desktop-shortcut.ps1](file:///L:/source/cursor-profile-manager/install-desktop-shortcut.ps1) | Sets up or repairs a Windows Desktop shortcut with the native Cursor icon. |
+| [run-tests.ps1](file:///L:/source/cursor-profile-manager/run-tests.ps1) | PowerShell test runner for Pester unit testing. |
+| [tests/](file:///L:/source/cursor-profile-manager/tests/) | Directory containing Pester unit tests. |
+| [agent-story/](file:///L:/source/cursor-profile-manager/agent-story/) | Embedded Node/React proxy and visualization dashboard codebase. |
+| [screenshots/](file:///L:/source/cursor-profile-manager/screenshots/) | PNG screenshots for documentation. |
+| [CHANGELOG.md](file:///L:/source/cursor-profile-manager/CHANGELOG.md) | Release change log. |
+| [AGENTS.md](file:///L:/source/cursor-profile-manager/AGENTS.md) | Technical guidelines, rules, and reference files for AI coding assistants. |
 
-```powershell
-& "$env:LOCALAPPDATA\Programs\cursor\Cursor.exe" `
-  --user-data-dir "$env:USERPROFILE\.cursor-profiles\agent-1" `
-  --new-window L:\source\my-project
-```
+## Notes & Limitations
 
-## Project files
-
-| File | Purpose |
-|------|---------|
-| `cursor-profile-manager.ps1` | Main WinForms GUI |
-| `cursor-profile-manager.bat` | Hidden PowerShell launcher |
-| `install-desktop-shortcut.ps1` | Creates/repairs a Desktop shortcut |
-| `run-tests.ps1` | Pester unit test runner |
-| `tests/` | Unit tests for core helpers and logic |
-| `screenshots/` | README screenshots of the GUI |
-| `CHANGELOG.md` | User-facing change history |
-| `AGENTS.md` | Guide for AI agents and PowerShell conventions in this repo |
-| `agent-story/` | MITM proxy + web dashboard for intercepting Cursor AI traffic (started from toolbar) |
-
-## Notes
-
-- **Windows only** — WinForms GUI; requires **Windows PowerShell 5.1+** (built into Windows).
-- Each running profile is a separate Electron process (~500 MB+ RAM).
-- Extensions are duplicated per profile on disk.
-- Terminal `cursor` always uses the default profile — use this manager for extra instances.
+* **OS Support:** Windows only. Relies on PowerShell 5.1+ and .NET WinForms.
+* **Resources:** Each profile runs separate Electron rendering processes (~500 MB+ RAM each).
+* **Extensions:** Extensions are downloaded and stored separately in each profile's user-data directory.
+* **CLI Command:** Global terminal calls to `cursor` command will use your default profile settings. Use the manager to launch secondary instances.
 
 ## License
 
 MIT
+

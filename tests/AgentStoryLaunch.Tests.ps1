@@ -161,6 +161,23 @@ Describe 'Cursor proxy launch helpers' {
                 Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
             }
         }
+
+        It 'skips proxy update when settings.json is not valid JSON' {
+            $tempDir = Join-Path $env:TEMP ("cpm-proxy-settings-" + [guid]::NewGuid().ToString())
+            New-Item -ItemType Directory -Path (Join-Path $tempDir 'User') -Force | Out-Null
+            try {
+                $settingsPath = Get-CursorProfileUserSettingsPath -UserDataDir $tempDir
+                $invalidJson = '{ "editor.fontSize": 14, // trailing comment }'
+                Set-Content -Path $settingsPath -Value $invalidJson -Encoding UTF8
+                Update-CursorProfileProxySettings -UserDataDir $tempDir -EnableProxy:$true
+                $after = (Get-Content -Raw -Path $settingsPath -Encoding UTF8).TrimEnd()
+                $after | Should Be $invalidJson
+                $after.Contains('http.proxy') | Should Be $false
+            }
+            finally {
+                Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 
     Context 'Profile context marker and identity env' {

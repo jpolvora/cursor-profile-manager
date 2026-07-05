@@ -142,6 +142,11 @@ export default function App() {
     activeThread ? `thread: ${activeThread.split('/').pop()}` : null
   ].filter(Boolean).join(' · ');
 
+  const gridScrollKey = useMemo(
+    () => [activeProject, activeInstance, activeThread, searchTerm, methodFilter].join('\0'),
+    [activeProject, activeInstance, activeThread, searchTerm, methodFilter]
+  );
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -201,6 +206,7 @@ export default function App() {
               loading={loading}
               error={error}
               searchTerm={searchTerm}
+              resetScrollKey={gridScrollKey}
             />
           </main>
 

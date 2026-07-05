@@ -4,6 +4,19 @@ All notable user-facing changes to Cursor Profile Manager.
 
 Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (when applicable). Newest dates first.
 
+## 2.0.7
+
+### Fixed
+
+- **Profile launch registration** — `--add` follow-up launches no longer overwrite the main-process PID in the context marker and Agent Story registry; pre-launch marker writes with a null PID were removed.
+- **Stale PID registry** — re-registering a profile removes the previous main-process mapping so recycled Windows PIDs cannot point at the wrong profile.
+- **Proxy settings safety** — `settings.json` is not rewritten when the file is not valid JSON (avoids destroying comment-heavy VS Code settings).
+- **Agent Story grid** — scroll position resets when filters or search change.
+
+### Changed
+
+- Release marker bumped to **2.0.7** (`# App-Version` / `$script:AppVersionId`).
+
 ## 2.0.6
 
 ### Fixed
