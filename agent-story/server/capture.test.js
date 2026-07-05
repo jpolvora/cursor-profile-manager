@@ -147,3 +147,19 @@ test('buildCaptureRecord stores decompressed plain text for requests and respons
   assert.equal(record.request_body, reqJson);
   assert.match(record.response_body, /"result":"ok"/);
 });
+
+test('bufferToPlainText extracts embedded strings from binary protobuf instead of garbled UTF-8', () => {
+  const buf = Buffer.alloc(200);
+  for (let i = 0; i < 200; i++) buf[i] = 0x80 + (i % 50);
+  buf.write('client-telemetry-data', 50);
+
+  const plain = bufferToPlainText(buf, 'application/x-protobuf');
+  assert.match(plain, /client-telemetry-data/);
+  assert.doesNotMatch(plain, /\uFFFD/);
+});
+
+test('bufferToPlainText falls back to base64 for opaque binary without embedded strings', () => {
+  const buf = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
+  const plain = bufferToPlainText(buf, 'application/octet-stream');
+  assert.match(plain, /^base64:/);
+});

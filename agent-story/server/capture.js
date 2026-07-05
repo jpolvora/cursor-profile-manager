@@ -1,14 +1,25 @@
 const PRINTABLE_SAMPLE = 8192;
 const PRINTABLE_THRESHOLD = 0.82;
 
+function isValidUtf8(buffer) {
+  if (!buffer || buffer.length === 0) return true;
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isMostlyText(buffer) {
   if (!buffer || buffer.length === 0) return true;
+  if (!isValidUtf8(buffer)) return false;
   const sampleLen = Math.min(buffer.length, PRINTABLE_SAMPLE);
   let printable = 0;
   for (let i = 0; i < sampleLen; i++) {
     const b = buffer[i];
     if (b === 9 || b === 10 || b === 13 || (b >= 32 && b <= 126)) printable++;
-    else if (b >= 128) printable++; // UTF-8 multibyte
+    else if (b >= 128) printable++;
   }
   return printable / sampleLen >= PRINTABLE_THRESHOLD;
 }
@@ -115,9 +126,23 @@ function decodeConnectBodyToText(buffer) {
 }
 
 function extractPrintableRuns(buffer, minLength = 12) {
-  const text = buffer.toString('utf8');
-  const runs = text.match(/[\x09\x0a\x0d\x20-\x7e\u00a0-\ufffd]{12,}/g) || [];
-  return runs.map(s => s.trim()).filter(Boolean);
+  if (!buffer || buffer.length === 0) return [];
+  const runs = [];
+  let start = -1;
+  for (let i = 0; i <= buffer.length; i++) {
+    const b = i < buffer.length ? buffer[i] : -1;
+    const printable = b === 9 || b === 10 || b === 13 || (b >= 32 && b <= 126);
+    if (printable) {
+      if (start < 0) start = i;
+    } else if (start >= 0) {
+      if (i - start >= minLength) {
+        const run = buffer.toString('ascii', start, i).trim();
+        if (run) runs.push(run);
+      }
+      start = -1;
+    }
+  }
+  return runs;
 }
 
 function parseSseEvents(text) {
@@ -429,26 +454,38 @@ function decompressBody(buffer, contentEncoding) {
   return buffer;
 }
 
+function isConnectContentType(contentType) {
+  const ct = normalizeContentType(contentType);
+  return ct.includes('connect') || ct.includes('grpc');
+}
+
+function looksLikeConnectEnvelope(buffer) {
+  if (!buffer || buffer.length < 5) return false;
+  const length = buffer.readUInt32BE(1);
+  return length > 0 && 5 + length <= buffer.length;
+}
+
 function bufferToPlainText(buffer, contentType, contentEncoding) {
   if (!buffer || buffer.length === 0) return '';
 
   const raw = decompressBody(buffer, contentEncoding);
-  const ct = normalizeContentType(contentType);
+  const asText = raw.toString('utf8');
 
-  if (isMostlyText(raw)) {
-    return raw.toString('utf8');
+  if (tryParseJson(asText)) {
+    return asText;
   }
 
-  if (ct.includes('connect') || ct.includes('proto') || ct.includes('grpc')) {
+  if (isConnectContentType(contentType) || looksLikeConnectEnvelope(raw)) {
     const connectText = decodeConnectBodyToText(raw);
     if (connectText) return connectText;
   }
 
-  const connectText = decodeConnectBodyToText(raw);
-  if (connectText) return connectText;
-
-  const strings = extractPrintableRuns(raw, 8);
+  const strings = extractPrintableRuns(raw, 4);
   if (strings.length) return strings.join('\n');
+
+  if (isMostlyText(raw)) {
+    return asText;
+  }
 
   return bufferToStorage(raw).text;
 }

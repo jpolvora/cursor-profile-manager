@@ -368,12 +368,9 @@ proxy.onRequest(function(ctx, callback) {
   ctx.requestStartTime = Date.now();
   ctx.captureKey = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-  // If a non-captured host slips through (e.g. plain HTTP), just pass it along
   if (!shouldCaptureHost(host)) {
     return callback();
   }
-
-  ctx.profileContext = resolveProfileContextForCapture(ctx, PROXY_PORT);
 
   const reqChunks = [];
   ctx.onRequestData(function(ctx, chunk, callback) {
@@ -397,16 +394,25 @@ proxy.onRequest(function(ctx, callback) {
 
     const resContentType = ctx.serverToProxyResponse?.headers?.['content-type'];
     if (isStreamingContentType(resContentType)) {
-      if (!ctx.provisionalRowId) {
-        insertProvisionalStreamingCapture(ctx, host);
+      if (!ctx.provisionalRowId && !ctx.provisionalCaptureQueued) {
+        ctx.provisionalCaptureQueued = true;
+        setImmediate(() => {
+          try {
+            insertProvisionalStreamingCapture(ctx, host);
+          } catch (err) {
+            console.error('Provisional capture error:', err);
+          }
+        });
       }
-      notifyClients('stream-progress', {
-        capture_key: ctx.captureKey,
-        url: (ctx.isSSL ? 'https://' : 'http://') + host + (ctx.clientToProxyRequest.url || ''),
-        method: ctx.clientToProxyRequest.method,
-        bytes: ctx.totalResponseBytes,
-        elapsed_ms: Date.now() - ctx.requestStartTime,
-        time_to_first_token_ms: ctx.firstChunkTime - ctx.requestStartTime
+      setImmediate(() => {
+        notifyClients('stream-progress', {
+          capture_key: ctx.captureKey,
+          url: (ctx.isSSL ? 'https://' : 'http://') + host + (ctx.clientToProxyRequest.url || ''),
+          method: ctx.clientToProxyRequest.method,
+          bytes: ctx.totalResponseBytes,
+          elapsed_ms: Date.now() - ctx.requestStartTime,
+          time_to_first_token_ms: ctx.firstChunkTime - ctx.requestStartTime
+        });
       });
     }
 
@@ -424,6 +430,14 @@ proxy.onRequest(function(ctx, callback) {
         console.error('Capture Error:', err);
       }
     });
+  });
+
+  // Forward immediately; resolve profile context in the background so agent
+  // API requests are not blocked on PowerShell/CIM lookups.
+  setImmediate(() => {
+    if (!ctx.profileContext) {
+      ctx.profileContext = resolveProfileContextForCapture(ctx, PROXY_PORT);
+    }
   });
 
   return callback();

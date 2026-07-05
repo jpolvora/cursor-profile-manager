@@ -19,8 +19,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 2.0.11
-$script:AppVersionId = '2.0.11'
+# App-Version: 2.0.12
+$script:AppVersionId = '2.0.12'
 $script:AppDisplayName = 'Cursor Profile Manager'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
@@ -32,6 +32,8 @@ $script:lnkAgentStoryOpen = $null
 $script:sepAgentStory = $null
 $script:AgentStoryUiUrl = 'http://localhost:5173/'
 $script:AgentStoryProxyUrl = 'http://127.0.0.1:8080'
+$script:CursorProxyBypassList = 'localhost;127.0.0.1;.github.com;github.com;.gitlab.com;gitlab.com;.bitbucket.org;bitbucket.org'
+$script:CursorNoProxyList = 'localhost,127.0.0.1,.github.com,github.com,.gitlab.com,gitlab.com,.bitbucket.org,bitbucket.org'
 $script:ProfileContextMarkerFile = 'cursor-profile-manager.context.json'
 $script:UiShuttingDown = $false
 $script:InstallRoot = $PSScriptRoot
@@ -1555,6 +1557,7 @@ function Get-CursorProxyLaunchArgs {
     $proxyUrl = Get-CursorProxyUrl
     return @(
         "--proxy-server=$proxyUrl",
+        "--proxy-bypass-list=$script:CursorProxyBypassList",
         '--ignore-certificate-errors'
     )
 }
@@ -1572,7 +1575,7 @@ function Get-CursorProxyEnvironmentVariables {
     return @{
         HTTP_PROXY                   = $proxyUrl
         HTTPS_PROXY                  = $proxyUrl
-        NO_PROXY                     = 'localhost,127.0.0.1'
+        NO_PROXY                     = $script:CursorNoProxyList
         NODE_TLS_REJECT_UNAUTHORIZED = '0'
     }
 }

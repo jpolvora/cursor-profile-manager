@@ -8,6 +8,9 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ### Fixed
 
+- **Agent Story non-blocking capture** — the MITM proxy no longer blocks Cursor agent API requests on profile resolution (PowerShell/CIM lookups) or streaming first-chunk DB writes; traffic forwards immediately while capture runs in the background.
+- **Proxied launch bypass lists** — Chromium now gets `--proxy-bypass-list` and Node subprocesses get an expanded `NO_PROXY` (localhost, Git hosts) so non-AI traffic is not routed through the MITM proxy.
+- **Agent Story binary payload display** — protobuf and other binary request bodies (e.g. telemetry `tev1/v1/rgstr`) no longer render as garbled UTF-8 with replacement characters; embedded ASCII strings are extracted, and opaque binary falls back to base64.
 - **Agent Story plain-text capture** — intercepted request and response bodies are now decompressed (gzip/deflate/brotli) and Connect/protobuf frames decoded to readable text before saving to the database, instead of storing opaque base64 blobs.
 - **Agent Story capture persistence** — proxy requests were intercepted but not saved to the dashboard database because `insertInteraction.run()` was called on a wrapper function; captures now persist and SSE live updates work again.
 - **Agent Story profile assignment** — client PID lookup for proxied Cursor traffic no longer relies on a slow PowerShell `Get-NetTCPConnection` sweep that timed out under load; a fast `netstat -ano` map assigns requests to the correct profile when two or more proxied instances are running.

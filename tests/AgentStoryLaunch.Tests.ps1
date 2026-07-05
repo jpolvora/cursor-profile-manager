@@ -110,9 +110,10 @@ Describe 'Cursor proxy launch helpers' {
 
         It 'returns Chromium proxy flags when proxy is enabled' {
             $launchArgs = Get-CursorProxyLaunchArgs -UseProxy:$true
-            $launchArgs.Count | Should Be 2
+            $launchArgs.Count | Should Be 3
             $launchArgs[0] | Should Be '--proxy-server=http://127.0.0.1:8080'
-            $launchArgs[1] | Should Be '--ignore-certificate-errors'
+            $launchArgs[1] | Should Be '--proxy-bypass-list=localhost;127.0.0.1;.github.com;github.com;.gitlab.com;gitlab.com;.bitbucket.org;bitbucket.org'
+            $launchArgs[2] | Should Be '--ignore-certificate-errors'
         }
     }
 
@@ -126,7 +127,7 @@ Describe 'Cursor proxy launch helpers' {
             $envVars.HTTP_PROXY | Should Be 'http://127.0.0.1:8080'
             $envVars.HTTPS_PROXY | Should Be 'http://127.0.0.1:8080'
             $envVars.NODE_TLS_REJECT_UNAUTHORIZED | Should Be '0'
-            $envVars.NO_PROXY | Should Be 'localhost,127.0.0.1,.github.com,github.com,.gitlab.com,.bitbucket.org'
+            $envVars.NO_PROXY | Should Be 'localhost,127.0.0.1,.github.com,github.com,.gitlab.com,gitlab.com,.bitbucket.org,bitbucket.org'
         }
     }
 

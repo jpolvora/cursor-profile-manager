@@ -105,10 +105,12 @@ By using separate user-data directories (instead of Cursor's `--profile` flag), 
 ### Network Proxy Mechanism
 
 When a profile is launched with proxying enabled:
-1. **Chromium Proxy:** Appends `--proxy-server="http://127.0.0.1:8080"` and `--ignore-certificate-errors` flags to route web-based telemetry, authentication, and updates.
-2. **Node Agent Proxy:** Sets `HTTP_PROXY="http://127.0.0.1:8080"`, `HTTPS_PROXY="http://127.0.0.1:8080"`, and `NODE_TLS_REJECT_UNAUTHORIZED=0` environment variables.
+1. **Chromium Proxy:** Appends `--proxy-server`, `--proxy-bypass-list` (localhost + Git hosts), and `--ignore-certificate-errors` so AI traffic is captured while Git and local services bypass the MITM.
+2. **Node Agent Proxy:** Sets `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` (same bypass hosts), and `NODE_TLS_REJECT_UNAUTHORIZED=0` so agent subprocesses route Cursor API calls through Agent Story without blocking on capture work.
 3. **Settings Injection:** Automatically configures `"http.proxy": "http://127.0.0.1:8080"` and `"http.proxyStrictSSL": false` in `<profile-dir>\User\settings.json`.
 4. **PID Grouping:** Writes a temporary `<user-data-dir>\cursor-profile-manager.context.json` file and registers the process PID with Agent Story via `POST /api/profile-sessions/register` so that TCP traffic captured by the proxy maps cleanly to the project name.
+
+Agent Story forwards intercepted Cursor API traffic immediately; capture and profile resolution run in the background so agent chat streams are not delayed.
 
 ### Runtime Detection
 
