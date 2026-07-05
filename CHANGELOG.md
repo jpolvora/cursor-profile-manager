@@ -10,6 +10,10 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 - **Open dashboard** link on the toolbar — appears when the Agent Story UI is listening on port 5173; opens `http://localhost:5173/` in your default browser (`AGENT_STORY_UI_URL` overrides the URL).
 
+### Fixed
+
+- **Agent Story MITM proxy IPv4 bind** — the proxy now listens on `127.0.0.1:8080` instead of IPv6-only `[::1]:8080`, so Cursor instances launched with `--proxy-server=http://127.0.0.1:8080` can connect and capture traffic.
+
 ## 2.0.1
 
 ### Changed

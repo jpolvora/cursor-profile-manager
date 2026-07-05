@@ -259,11 +259,13 @@ function startApiServer() {
 
 startApiServer();
 
-proxy.listen({ port: PROXY_PORT }, function(err) {
+// Bind IPv4 explicitly — Node/http-mitm-proxy may otherwise listen on [::1] only,
+// while Cursor's --proxy-server=http://127.0.0.1:8080 connects over IPv4.
+proxy.listen({ host: '127.0.0.1', port: PROXY_PORT }, function(err) {
   if (err) {
     console.error(`Failed to start MITM proxy on port ${PROXY_PORT}:`, err.message);
     process.exit(1);
   }
-  console.log(`MITM Proxy listening on port ${PROXY_PORT}.`);
+  console.log(`MITM Proxy listening on http://127.0.0.1:${PROXY_PORT}.`);
   console.log('Run Cursor with: --proxy-server="http://127.0.0.1:8080" --ignore-certificate-errors');
 });
