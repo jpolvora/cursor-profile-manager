@@ -18,12 +18,17 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 1.3.6
+# App-Version: 1.3.9
 $AppWindowTitle = 'Cursor Profile Manager'
 $SingleInstanceMutexName = 'Local\CursorProfileManager_GUI_v1'
-$script:AppVersionId = '1.3.6'
+$script:AppVersionId = '1.3.9'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
+$script:AgentStoryProxyProcess = $null
+$script:AgentStoryUiProcess = $null
+$script:btnAgentStory = $null
+$script:lblAgentStoryStatus = $null
+$script:sepAgentStory = $null
 $script:InstallRoot = $PSScriptRoot
 $script:UpdateRepoId = 'jpolvora/cursor-profile-manager'
 $script:UpdateBranch = 'master'
@@ -494,7 +499,15 @@ function Load-Profiles {
         if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
         $data = $raw | ConvertFrom-Json
         if ($null -eq $data) { return @() }
-        return , @($data)
+        
+        $profilesList = @()
+        foreach ($p in @($data)) {
+            if ($null -eq $p.psobject.Properties['RunProxied']) {
+                $p | Add-Member -MemberType NoteProperty -Name 'RunProxied' -Value $false -Force
+            }
+            $profilesList += $p
+        }
+        return , $profilesList
     }
     catch {
         Write-Warning "Failed to read profiles.json: $($_.Exception.Message)"
@@ -522,7 +535,8 @@ function New-ProfileObject {
         [string]$Name,
         [string]$UserDataDir,
         [string]$ProjectPath,
-        [string]$Notes
+        [string]$Notes,
+        [bool]$RunProxied = $false
     )
     [PSCustomObject]@{
         Id          = [guid]::NewGuid().ToString()
@@ -530,6 +544,7 @@ function New-ProfileObject {
         UserDataDir = $UserDataDir
         ProjectPath = $ProjectPath
         Notes       = $Notes
+        RunProxied  = $RunProxied
         CreatedAt   = (Get-Date).ToString('s')
     }
 }
@@ -661,6 +676,17 @@ function Apply-ToolbarTheme {
     if ($btnAdd) {
         Update-ToolbarButtonTheme -Button $btnAdd
         Update-ToolbarButtonTheme -Button $btnRefresh
+    }
+
+    if ($script:btnAgentStory) {
+        Update-ToolbarButtonTheme -Button $script:btnAgentStory
+    }
+    if ($script:lblAgentStoryStatus) {
+        $script:lblAgentStoryStatus.ForeColor = if ($script:AgentStoryProxyProcess -and -not $script:AgentStoryProxyProcess.HasExited) { $script:UiRunningColor } else { $script:UiTextMuted }
+        $script:lblAgentStoryStatus.BackColor = $script:UiPanelColor
+    }
+    if ($script:sepAgentStory) {
+        $script:sepAgentStory.BackColor = $script:UiBorderColor
     }
 
     if ($script:ThemeLabel) {
@@ -1056,6 +1082,372 @@ function Invoke-CheckForAppUpdate {
     $remoteFiles = Get-RemoteManagedUpdateFiles -MainScriptContent $remoteMainScript
     Save-UpdateStagingFiles -FilesByName $remoteFiles -StagingDir $stagingDir
     Start-DeferredAppUpdate -StagingDir $stagingDir
+}
+
+# ---------------------------------------------------------------------------
+# Agent Story integration helpers
+# ---------------------------------------------------------------------------
+
+function Find-AgentStoryRoot {
+    if ($env:AGENT_STORY_DIR -and (Test-Path $env:AGENT_STORY_DIR)) {
+        return (Resolve-Path $env:AGENT_STORY_DIR).Path
+    }
+    if ([string]::IsNullOrWhiteSpace($script:InstallRoot)) {
+        return $null
+    }
+    $embedded = Join-Path $script:InstallRoot 'agent-story'
+    if (Test-Path $embedded) {
+        return (Resolve-Path $embedded).Path
+    }
+    return $null
+}
+
+function Test-TcpPortInUse {
+    param(
+        [Parameter(Mandatory)][int]$Port
+    )
+
+    foreach ($address in @([System.Net.IPAddress]::Loopback, [System.Net.IPAddress]::IPv6Loopback)) {
+        $listener = $null
+        try {
+            $listener = New-Object System.Net.Sockets.TcpListener($address, $Port)
+            $listener.Start()
+        }
+        catch {
+            return $true
+        }
+        finally {
+            if ($listener) {
+                try { $listener.Stop() } catch { }
+            }
+        }
+    }
+
+    return $false
+}
+
+function Get-AgentStoryBlockedPorts {
+    $blocked = @()
+    foreach ($port in @(8080, 3001, 5173)) {
+        if (Test-TcpPortInUse -Port $port) {
+            $blocked += $port
+        }
+    }
+    return , $blocked
+}
+
+function Test-AgentStoryProcessAlive {
+    param(
+        [System.Diagnostics.Process]$Process
+    )
+
+    if (-not $Process) { return $false }
+    try {
+        return -not $Process.HasExited
+    }
+    catch {
+        return $false
+    }
+}
+
+function Test-AgentStoryServicePortListening {
+    param(
+        [Parameter(Mandatory)][int]$Port
+    )
+
+    return ((Get-ListenerProcessIdsForPort -Port $Port).Count -gt 0)
+}
+
+function Test-AgentStoryProxyRunning {
+    if (-not (Test-AgentStoryProcessAlive -Process $script:AgentStoryProxyProcess)) {
+        return $false
+    }
+    return (Test-AgentStoryServicePortListening -Port 8080)
+}
+
+function Get-CursorProxyLaunchArgs {
+    param(
+        [bool]$UseProxy
+    )
+
+    if (-not $UseProxy) {
+        return @()
+    }
+    return @(
+        '--proxy-server=http://127.0.0.1:8080',
+        '--ignore-certificate-errors'
+    )
+}
+
+function Get-NpmExecutablePath {
+    $npmCmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if ($npmCmd) {
+        return $npmCmd.Source
+    }
+
+    $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+    if ($npmCmd) {
+        return $npmCmd.Source
+    }
+
+    return $null
+}
+
+function Show-AgentStoryStartFailure {
+    param(
+        [Parameter(Mandatory)][string]$Message
+    )
+
+    if ($script:btnAgentStory) {
+        [System.Windows.Forms.MessageBox]::Show(
+            $Message,
+            'Agent Story Start Failed',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+    }
+    else {
+        Write-Warning $Message
+    }
+}
+
+function Wait-AgentStoryProcessesHealthy {
+    param(
+        [int]$TimeoutMs = 15000
+    )
+
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $proxyAlive = Test-AgentStoryProcessAlive -Process $script:AgentStoryProxyProcess
+        $uiAlive = Test-AgentStoryProcessAlive -Process $script:AgentStoryUiProcess
+        $proxyPort = Test-AgentStoryServicePortListening -Port 8080
+        $apiPort = Test-AgentStoryServicePortListening -Port 3001
+        $uiPort = Test-AgentStoryServicePortListening -Port 5173
+
+        if ($proxyAlive -and $uiAlive -and $proxyPort -and $apiPort -and $uiPort) {
+            return $true
+        }
+
+        if (-not $proxyAlive -or -not $uiAlive) {
+            return $false
+        }
+
+        Start-Sleep -Milliseconds 250
+    }
+
+    return $false
+}
+
+function Ensure-NodeDependencies {
+    param(
+        [Parameter(Mandatory)][string]$Dir,
+        [Parameter(Mandatory)][string]$Name
+    )
+    $nodeModules = Join-Path $Dir "node_modules"
+    if (Test-Path $nodeModules) {
+        return $true
+    }
+    
+    $confirm = [System.Windows.Forms.MessageBox]::Show(
+        "Dependencies (node_modules) are missing for Agent Story $Name. Would you like to run 'npm install' now? This will open a terminal window.",
+        "Missing Dependencies",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+    if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) {
+        return $false
+    }
+    
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "cmd.exe"
+        $psi.Arguments = "/c echo Installing $Name dependencies... && npm install"
+        $psi.WorkingDirectory = $Dir
+        $psi.UseShellExecute = $true
+        $p = [System.Diagnostics.Process]::Start($psi)
+        $p.WaitForExit()
+        if ($p.ExitCode -ne 0) {
+            [System.Windows.Forms.MessageBox]::Show("npm install failed with exit code $($p.ExitCode).", "Install Failed", "OK", "Error") | Out-Null
+            return $false
+        }
+        return $true
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show("Failed to start npm install: $($_.Exception.Message)", "Error", "OK", "Error") | Out-Null
+        return $false
+    }
+}
+
+function Start-AgentStoryProxy {
+    if (Test-AgentStoryProxyRunning) {
+        Update-AgentStoryUiState
+        return $true
+    }
+
+    foreach ($port in @(8080, 3001, 5173)) {
+        Stop-ListenerProcessesForPort -Port $port
+    }
+    Start-Sleep -Milliseconds 300
+
+    $root = Find-AgentStoryRoot
+    if (-not $root) {
+        Show-AgentStoryStartFailure -Message "Agent Story directory not found. Expected agent-story\ under the manager install folder, or set AGENT_STORY_DIR to override."
+        return $false
+    }
+
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    $npmPath = Get-NpmExecutablePath
+    if (-not $nodeCmd -or -not $npmPath) {
+        Show-AgentStoryStartFailure -Message "Node.js and npm are required to run Agent Story. Please install them and make sure they are on your PATH."
+        return $false
+    }
+
+    $blockedPorts = Get-AgentStoryBlockedPorts
+    if ($blockedPorts.Count -gt 0) {
+        $portList = ($blockedPorts -join ', ')
+        Show-AgentStoryStartFailure -Message "Agent Story ports are already in use: $portList.`n`nStop any running Agent Story instance, close orphaned Node/Vite processes, or click Stop Agent Story if the manager still shows it as running."
+        return $false
+    }
+
+    $serverDir = Join-Path $root 'server'
+    $uiDir = Join-Path $root 'ui'
+
+    if (-not (Ensure-NodeDependencies -Dir $serverDir -Name 'Server')) { return $false }
+    if (-not (Ensure-NodeDependencies -Dir $uiDir -Name 'UI')) { return $false }
+
+    try {
+        $serverPsi = New-Object System.Diagnostics.ProcessStartInfo
+        $serverPsi.FileName = $nodeCmd.Source
+        $serverPsi.Arguments = 'index.js'
+        $serverPsi.WorkingDirectory = $serverDir
+        $serverPsi.CreateNoWindow = $true
+        $serverPsi.UseShellExecute = $false
+        $script:AgentStoryProxyProcess = [System.Diagnostics.Process]::Start($serverPsi)
+    }
+    catch {
+        Show-AgentStoryStartFailure -Message "Failed to start Agent Story proxy server: $($_.Exception.Message)"
+        return $false
+    }
+
+    try {
+        $viteScript = Join-Path $uiDir 'node_modules\vite\bin\vite.js'
+        if (-not (Test-Path $viteScript)) {
+            Stop-AgentStory
+            Show-AgentStoryStartFailure -Message "Agent Story UI is missing Vite. Run npm install in agent-story\ui and try again."
+            return $false
+        }
+
+        $uiPsi = New-Object System.Diagnostics.ProcessStartInfo
+        $uiPsi.FileName = $nodeCmd.Source
+        $uiPsi.Arguments = "`"$viteScript`" --port 5173 --strictPort"
+        $uiPsi.WorkingDirectory = $uiDir
+        $uiPsi.CreateNoWindow = $true
+        $uiPsi.UseShellExecute = $false
+        $script:AgentStoryUiProcess = [System.Diagnostics.Process]::Start($uiPsi)
+    }
+    catch {
+        Stop-AgentStory
+        Show-AgentStoryStartFailure -Message "Failed to start Agent Story UI server: $($_.Exception.Message)"
+        return $false
+    }
+
+    if (-not (Wait-AgentStoryProcessesHealthy)) {
+        Stop-AgentStory
+        Show-AgentStoryStartFailure -Message "Agent Story started but exited or failed to bind ports 8080, 3001, and 5173.`n`nCheck for port conflicts or run server/ui manually from agent-story\ to see errors."
+        return $false
+    }
+
+    Update-AgentStoryUiState
+    return $true
+}
+
+function Get-ListenerProcessIdsForPort {
+    param(
+        [Parameter(Mandatory)][int]$Port
+    )
+
+    $pids = @()
+    $seen = @{}
+    try {
+        $matches = netstat -ano | Select-String -Pattern ":$Port\s+.*LISTENING"
+        foreach ($line in $matches) {
+            if ($line -match '\s+(\d+)\s*$') {
+                $procId = [int]$Matches[1]
+                if (-not $seen.ContainsKey($procId)) {
+                    $seen[$procId] = $true
+                    $pids += $procId
+                }
+            }
+        }
+    }
+    catch { }
+
+    return , $pids
+}
+
+function Stop-ListenerProcessesForPort {
+    param(
+        [Parameter(Mandatory)][int]$Port
+    )
+
+    foreach ($procId in (Get-ListenerProcessIdsForPort -Port $Port)) {
+        try {
+            & taskkill.exe /F /T /PID $procId | Out-Null
+        }
+        catch { }
+    }
+}
+
+function Stop-AgentStory {
+    if ($script:AgentStoryProxyProcess) {
+        try {
+            if (-not $script:AgentStoryProxyProcess.HasExited) {
+                & taskkill.exe /F /T /PID $script:AgentStoryProxyProcess.Id | Out-Null
+            }
+        } catch {}
+        $script:AgentStoryProxyProcess = $null
+    }
+    if ($script:AgentStoryUiProcess) {
+        try {
+            if (-not $script:AgentStoryUiProcess.HasExited) {
+                & taskkill.exe /F /T /PID $script:AgentStoryUiProcess.Id | Out-Null
+            }
+        } catch {}
+        $script:AgentStoryUiProcess = $null
+    }
+
+    foreach ($port in @(8080, 3001, 5173)) {
+        Stop-ListenerProcessesForPort -Port $port
+    }
+
+    Update-AgentStoryUiState
+}
+
+function Update-AgentStoryUiState {
+    if (-not $script:btnAgentStory -or -not $script:lblAgentStoryStatus) { return }
+
+    $proxyRunning = Test-AgentStoryProxyRunning
+    $uiRunning = Test-AgentStoryProcessAlive -Process $script:AgentStoryUiProcess
+
+    if ($proxyRunning -and $uiRunning) {
+        $script:btnAgentStory.Text = 'Stop Agent Story'
+        $script:lblAgentStoryStatus.Text = "$([char]0x25CF) Agent Story: Running (localhost:5173)"
+        $script:lblAgentStoryStatus.ForeColor = $script:UiRunningColor
+    }
+    elseif ($proxyRunning -or $uiRunning) {
+        $script:btnAgentStory.Text = 'Stop Agent Story'
+        $script:lblAgentStoryStatus.Text = "$([char]0x25CF) Agent Story: Partial"
+        $script:lblAgentStoryStatus.ForeColor = [System.Drawing.Color]::FromArgb(180, 120, 0)
+    }
+    else {
+        if ($script:AgentStoryProxyProcess -or $script:AgentStoryUiProcess) {
+            $script:AgentStoryProxyProcess = $null
+            $script:AgentStoryUiProcess = $null
+        }
+        $script:btnAgentStory.Text = 'Start Agent Story'
+        $script:lblAgentStoryStatus.Text = "$([char]0x25CB) Agent Story: Stopped"
+        $script:lblAgentStoryStatus.ForeColor = $script:UiTextMuted
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -1568,6 +1960,11 @@ function Edit-Profile {
         $Profile.UserDataDir = $result.UserDataDir
         $Profile.ProjectPath = $result.ProjectPath
         $Profile.Notes = $result.Notes
+        if ($null -eq $Profile.psobject.Properties['RunProxied']) {
+            $Profile | Add-Member -MemberType NoteProperty -Name 'RunProxied' -Value $result.RunProxied -Force
+        } else {
+            $Profile.RunProxied = $result.RunProxied
+        }
         Save-Profiles -Profiles $script:Profiles
         Update-ProfileGrid
         return $true
@@ -1745,19 +2142,51 @@ function Start-CursorProfileInstance {
         }
     }
 
+    $extraArgs = @()
+    if ($Profile.RunProxied) {
+        $proxyRunning = Test-AgentStoryProxyRunning
+
+        if (-not $proxyRunning) {
+            $startProxy = [System.Windows.Forms.MessageBox]::Show(
+                "This profile is configured to run proxied, but the Agent Story proxy is not running.`n`nWould you like to start the Agent Story proxy now?",
+                "Agent Story Proxy Not Running",
+                [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+                [System.Windows.Forms.MessageBoxIcon]::Question
+            )
+
+            if ($startProxy -eq [System.Windows.Forms.DialogResult]::Yes) {
+                $started = Start-AgentStoryProxy
+                if ($started) {
+                    $proxyRunning = Test-AgentStoryProxyRunning
+                }
+                else {
+                    return
+                }
+            }
+            elseif ($startProxy -eq [System.Windows.Forms.DialogResult]::No) {
+                $proxyRunning = $false
+            }
+            else {
+                return
+            }
+        }
+
+        $extraArgs = Get-CursorProxyLaunchArgs -UseProxy:$proxyRunning
+    }
+
     $instanceCounts = Get-UserDataDirInstanceCounts
     $runningCount = Get-ProfileInstanceCount -UserDataDir $Profile.UserDataDir -InstanceCounts $instanceCounts
 
     # Cursor/VS Code reuses the existing window when the same folder is already open,
     # even with --new-window. Open an empty window, then --add the project folder.
     if ($runningCount -gt 0 -and $projectExists) {
-        Start-Process -FilePath $cursor -ArgumentList @("--user-data-dir=$($Profile.UserDataDir)", '--new-window')
+        Start-Process -FilePath $cursor -ArgumentList (@("--user-data-dir=$($Profile.UserDataDir)", '--new-window') + $extraArgs)
         Start-Sleep -Milliseconds 800
-        Start-Process -FilePath $cursor -ArgumentList @("--user-data-dir=$($Profile.UserDataDir)", '--add', $Profile.ProjectPath)
+        Start-Process -FilePath $cursor -ArgumentList (@("--user-data-dir=$($Profile.UserDataDir)", '--add', $Profile.ProjectPath) + $extraArgs)
         return
     }
 
-    $argList = @("--user-data-dir=$($Profile.UserDataDir)", '--new-window')
+    $argList = @("--user-data-dir=$($Profile.UserDataDir)", '--new-window') + $extraArgs
     if ($projectExists) {
         $argList += $Profile.ProjectPath
     }
@@ -1778,7 +2207,7 @@ function Show-ProfileDialog {
 
     $dlg = New-Object System.Windows.Forms.Form
     $dlg.Text = if ($isEdit) { "Edit Profile" } else { "Add Profile" }
-    $dlg.Size = New-Object System.Drawing.Size(500, 360)
+    $dlg.Size = New-Object System.Drawing.Size(500, 394)
     $dlg.StartPosition = 'CenterParent'
     $dlg.FormBorderStyle = 'FixedDialog'
     $dlg.MaximizeBox = $false
@@ -1889,7 +2318,18 @@ function Show-ProfileDialog {
     if ($isEdit) { $txtNotes.Text = $Existing.Notes }
     $dlg.Controls.Add($txtNotes)
 
-    $y += 42
+    $y += 38
+
+    # Run proxied checkbox
+    $chkProxy = New-Object System.Windows.Forms.CheckBox
+    $chkProxy.Text = 'Run proxied (Route traffic through Agent Story proxy)'
+    $chkProxy.Location = New-Object System.Drawing.Point($fieldX, $y)
+    $chkProxy.Size = New-Object System.Drawing.Size($fieldWidth, 24)
+    $chkProxy.ForeColor = $script:UiTextPrimary
+    if ($isEdit) { $chkProxy.Checked = [bool]$Existing.RunProxied }
+    $dlg.Controls.Add($chkProxy)
+
+    $y += 34
 
     $sepHint = New-Object System.Windows.Forms.Panel
     $sepHint.Location = New-Object System.Drawing.Point(20, $y)
@@ -1966,6 +2406,7 @@ function Show-ProfileDialog {
         UserDataDir = $dir
         ProjectPath = $txtProj.Text.Trim()
         Notes       = $txtNotes.Text.Trim()
+        RunProxied  = $chkProxy.Checked
     }
 }
 
@@ -1988,6 +2429,7 @@ function New-GridRowModel {
         UserDataDir = $Profile.UserDataDir
         Notes       = $Profile.Notes
         IsRunning   = $isRunning
+        RunProxied  = [bool]$Profile.RunProxied
     }
 }
 
@@ -2019,7 +2461,8 @@ function Test-GridRowModelEqual {
         $A.Instances -eq $B.Instances -and
         $A.Name -eq $B.Name -and
         $A.UserDataDir -eq $B.UserDataDir -and
-        $A.Notes -eq $B.Notes
+        $A.Notes -eq $B.Notes -and
+        $A.RunProxied -eq $B.RunProxied
 }
 
 function Test-GridModelEqual {
@@ -2062,6 +2505,9 @@ function Sync-GridRowToView {
     }
     if ([string]$cells['Notes'].Value -ne $ModelRow.Notes) {
         $cells['Notes'].Value = $ModelRow.Notes
+    }
+    if ($cells['Proxy'].Value -ne $ModelRow.RunProxied) {
+        $cells['Proxy'].Value = $ModelRow.RunProxied
     }
     $statusColor = if ($ModelRow.IsRunning) { $script:RunningGridForeColor } else { $script:UiIdleColor }
     if ($cells['Status'].Style.ForeColor -ne $statusColor) {
@@ -2135,7 +2581,7 @@ function Apply-GridModelToView {
                 [void]$existingRows.Remove($id)
             }
             else {
-                $emptyCells = @(1..(5 + $script:GridActionColumnCount) | ForEach-Object { '' })
+                $emptyCells = @(1..$grid.Columns.Count | ForEach-Object { '' })
                 $rowIdx = $grid.Rows.Add($emptyCells)
                 $row = $grid.Rows[$rowIdx]
                 $row.Tag = $id
@@ -2407,6 +2853,17 @@ $grid.EditMode = [System.Windows.Forms.DataGridViewEditMode]::EditProgrammatical
 [void]$grid.Columns.Add('UserDataDir', 'User Data Dir')
 [void]$grid.Columns.Add('Instances', 'Instances')
 [void]$grid.Columns.Add('Status', 'Status')
+
+$colProxy = New-Object System.Windows.Forms.DataGridViewCheckBoxColumn
+$colProxy.Name = 'Proxy'
+$colProxy.HeaderText = 'Proxy'
+$colProxy.Width = 45
+$colProxy.MinimumWidth = 45
+$colProxy.FillWeight = 40
+$colProxy.ReadOnly = $true
+$colProxy.DefaultCellStyle.Alignment = [System.Drawing.ContentAlignment]::MiddleCenter
+[void]$grid.Columns.Add($colProxy)
+
 [void]$grid.Columns.Add('Notes', 'Notes')
 Add-GridActionColumns -TargetGrid $grid
 
@@ -2414,6 +2871,7 @@ $grid.Columns['Name'].ReadOnly = $true
 $grid.Columns['UserDataDir'].ReadOnly = $true
 $grid.Columns['Instances'].ReadOnly = $true
 $grid.Columns['Status'].ReadOnly = $true
+$grid.Columns['Proxy'].ReadOnly = $true
 $grid.Columns['Notes'].ReadOnly = $true
 
 $grid.Columns['Name'].FillWeight = 90
@@ -2440,7 +2898,17 @@ $script:RunningGridForeColor = $script:UiRunningColor
 
 $btnAdd = New-ToolbarButton -Text 'Add'
 $btnRefresh = New-ToolbarButton -Text 'Refresh'
-$script:ProfileFlow.Controls.AddRange(@($btnAdd, $btnRefresh))
+$script:sepAgentStory = New-ToolbarFlowSeparator
+$script:btnAgentStory = New-ToolbarButton -Text 'Start Agent Story' -Width 132
+$script:lblAgentStoryStatus = New-Object System.Windows.Forms.Label
+$script:lblAgentStoryStatus.Text = "$([char]0x25CB) Agent Story: Stopped"
+$script:lblAgentStoryStatus.ForeColor = $script:UiTextMuted
+$script:lblAgentStoryStatus.BackColor = $script:UiPanelColor
+$script:lblAgentStoryStatus.AutoSize = $true
+$script:lblAgentStoryStatus.Margin = New-Object System.Windows.Forms.Padding 0, 6, 8, 0
+$script:lblAgentStoryStatus.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+
+$script:ProfileFlow.Controls.AddRange(@($btnAdd, $btnRefresh, $script:sepAgentStory, $script:btnAgentStory, $script:lblAgentStoryStatus))
 
 $script:ThemeLabel = New-Object System.Windows.Forms.Label
 $script:ThemeLabel.Text = 'Theme:'
@@ -2477,7 +2945,7 @@ $btnAdd.Add_Click({
             [System.Windows.Forms.MessageBox]::Show("A profile named '$($result.Name)' already exists.", 'Duplicate name', 'OK', 'Warning') | Out-Null
             return
         }
-        $newProfile = New-ProfileObject -Name $result.Name -UserDataDir $result.UserDataDir -ProjectPath $result.ProjectPath -Notes $result.Notes
+        $newProfile = New-ProfileObject -Name $result.Name -UserDataDir $result.UserDataDir -ProjectPath $result.ProjectPath -Notes $result.Notes -RunProxied $result.RunProxied
         $script:Profiles = @($script:Profiles) + $newProfile
         Save-Profiles -Profiles $script:Profiles
         Update-ProfileGrid
@@ -2488,6 +2956,17 @@ $btnRefresh.Add_Click({
     [void](Get-CursorInstallInfo -ForceRefresh)
     Update-CursorInstallUi
     Update-ProfileGrid
+})
+
+$script:btnAgentStory.Add_Click({
+    $anyRunning = (Test-AgentStoryProcessAlive -Process $script:AgentStoryProxyProcess) -or
+        (Test-AgentStoryProcessAlive -Process $script:AgentStoryUiProcess)
+    if ($anyRunning) {
+        Stop-AgentStory
+    }
+    else {
+        [void](Start-AgentStoryProxy)
+    }
 })
 
 $grid.Add_CellContentClick({
@@ -2525,6 +3004,7 @@ $refreshTimer.Add_Tick({
         Set-UiThemePreference -Preference $script:UiThemePreference
     }
     Update-ProfileGrid
+    Update-AgentStoryUiState
 })
 $refreshTimer.Start()
 
@@ -2534,6 +3014,7 @@ $form.Add_FormClosing({
     $refreshTimer.Stop()
     $processEventDebounce.Stop()
     Stop-CursorProcessWatchers
+    Stop-AgentStory
 })
 
 [void](Get-CursorInstallInfo -ForceRefresh)

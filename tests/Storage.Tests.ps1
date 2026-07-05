@@ -38,6 +38,16 @@ Describe 'Profile and settings storage' {
             $loaded[0].Id | Should Be $profile.Id
         }
 
+        It 'adds missing RunProxied property on load' {
+            $json = '[{"Id":"test-123","Name":"test-load","UserDataDir":"C:\\temp","ProjectPath":"","Notes":"","CreatedAt":"2026-07-05T12:00:00"}]'
+            $badPath = Join-Path $global:ProfileManagerTestProfilesDir 'profiles.json'
+            Set-Content -Path $badPath -Value $json -Encoding UTF8
+
+            $loaded = Load-Profiles
+            $loaded.Count | Should Be 1
+            $loaded[0].RunProxied | Should Be $false
+        }
+
         It 'returns an empty list when profiles.json is corrupt' {
             $badPath = Join-Path $global:ProfileManagerTestProfilesDir 'profiles.json'
             Set-Content -Path $badPath -Value '{ not valid json' -Encoding UTF8

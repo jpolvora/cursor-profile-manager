@@ -4,6 +4,45 @@ All notable user-facing changes to Cursor Profile Manager.
 
 Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (when applicable). Newest dates first.
 
+## 2026-07-05 (3)
+
+### Fixed
+
+- **Start Agent Story** — pre-flight port checks, post-start health validation, and clearer error dialogs when ports are busy or processes exit early.
+- **Agent Story cleanup** — stopping Agent Story now also releases listeners on ports 8080, 3001, and 5173 (clears orphaned Node/Vite processes from prior runs).
+- **Health check** — service detection uses listening-process lookup instead of a loopback bind test (fixes false failures when the API binds on `0.0.0.0:3001`).
+- **Proxied relaunch** — `--add` project-folder launches now include proxy flags when the profile is configured as proxied.
+- **Agent Story server** — API and proxy start independently with explicit bind errors; port conflicts exit cleanly.
+
+### Changed
+
+- Agent Story UI is started via `node …/vite.js --port 5173 --strictPort` for reliable process tracking and a fixed dashboard port.
+- Running status shows dashboard URL: `Running (localhost:5173)`; partial startup shows `Partial`.
+- Release marker bumped to **1.3.9** (`# App-Version` / `$script:AppVersionId`).
+
+## 2026-07-05 (2)
+
+### Fixed
+
+- **Agent Story path** — `Find-AgentStoryRoot` now resolves `agent-story\` under the manager install folder instead of a sibling directory at the parent path (e.g. `L:\source\agent-story`).
+
+### Changed
+
+- Release marker bumped to **1.3.8** (`# App-Version` / `$script:AppVersionId`).
+
+## 2026-07-05
+
+### Added
+
+- **Agent Story MITM Proxy Integration** — Start and stop the Agent Story proxy and Vite UI server directly from the manager toolbar.
+- **Run Proxied profile option** — Added a `Proxy` checkbox column to the profiles grid and a `Run proxied` option to the Add/Edit Profile Dialog.
+- **Auto-stop on close** — Background Node/Vite processes are automatically terminated on window close using process-tree termination (`taskkill`).
+- **Prompt to start proxy** — Launching a proxied profile when the proxy is stopped prompts the user to start the proxy, launch unproxied, or abort.
+
+### Changed
+
+- Release marker bumped to **1.3.7** (`# App-Version` / `$script:AppVersionId`).
+
 ## 2026-07-02
 
 ### Added

@@ -24,6 +24,12 @@ Describe 'Grid model' {
             $row.Instances | Should Be 2
             $row.Status | Should Be $UiStatusRunning
         }
+
+        It 'includes RunProxied in row model' {
+            $profile = New-TestProfile -Name 'proxied' -RunProxied $true
+            $row = New-GridRowModel -Profile $profile -InstanceCount 0
+            $row.RunProxied | Should Be $true
+        }
     }
 
     Context 'Test-GridRowModelEqual and Test-GridModelEqual' {
@@ -32,6 +38,14 @@ Describe 'Grid model' {
             $rowA = New-GridRowModel -Profile $profile -InstanceCount 0
             $rowB = New-GridRowModel -Profile $profile -InstanceCount 1
 
+            Test-GridRowModelEqual -A $rowA -B $rowB | Should Be $false
+        }
+
+        It 'detects RunProxied differences' {
+            $profileA = New-TestProfile -Name 'same' -RunProxied $false
+            $profileB = New-TestProfile -Name 'same' -RunProxied $true
+            $rowA = New-GridRowModel -Profile $profileA -InstanceCount 0
+            $rowB = New-GridRowModel -Profile $profileB -InstanceCount 0
             Test-GridRowModelEqual -A $rowA -B $rowB | Should Be $false
         }
 

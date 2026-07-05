@@ -63,7 +63,8 @@ Re-run after moving this folder to repair the shortcut.
 | **Double-click row** | Same as **Start** in the Actions column |
 | **Status column** | `● Running` / `○ Idle` from live `Cursor.exe` process inspection |
 | **Instances column** | Count of running windows per profile (0, 1, 2, …) |
-| **Grid columns** | Name, User Data Dir, Instances, Status, Notes, Actions (default project folder is edited in Add/Edit only) |
+| **Grid columns** | Name, User Data Dir, Instances, Status, Proxy, Notes, Actions (default project folder is edited in Add/Edit only) |
+| **Agent Story** | Start/stop the Agent Story proxy and dashboard directly from the toolbar. Run proxied profiles automatically route traffic to the proxy |
 | **Live updates** | WMI process create/exit events + 2 s fallback poll; grid updates only when data changes |
 | **Single instance** | Second launch activates the existing manager window |
 | **Persistence** | Profiles saved to `profiles.json` in the profiles directory |
@@ -81,6 +82,7 @@ Re-run after moving this folder to repair the shortcut.
 5. Click **Start ▶** again on the same row to open another window for that profile.
 6. Use other Actions: **Focus** / **Close** (when running), **Folder**, **Edit**, or **Del**.
 7. On first launch, sign in with the account for that profile; settings and extensions persist there.
+8. To inspect Cursor AI traffic, check the **Run proxied** option in the profile's Add/Edit dialog. Start the proxy server by clicking **Start Agent Story** on the toolbar, and start your profile. The manager will prompt you to start the proxy if it isn't running when you start a proxied profile.
 
 ## Technical details
 
@@ -113,6 +115,7 @@ The UI grid is driven by an in-memory model; the grid is touched only when that 
 |----------|-------------|
 | `CURSOR_PROFILES_DIR` | Root for profile folders and `profiles.json` |
 | `CURSOR_BIN` | Path to `Cursor.exe` (auto-detected if unset) |
+| `AGENT_STORY_DIR` | Path to the `agent-story` folder (default: `agent-story\` under the manager install folder) |
 
 Cursor IDE is auto-detected under `%LOCALAPPDATA%\Programs\cursor\` (or `Cursor\`), then `cursor` on PATH. The footer shows the detected version; the **cursor** CLI is checked on PATH or beside the IDE install. Use **Install Cursor** in the footer if neither is found.
 
@@ -128,6 +131,7 @@ Stored at `<CURSOR_PROFILES_DIR>\profiles.json`:
     "UserDataDir": "C:\\Users\\you\\.cursor-profiles\\Work",
     "ProjectPath": "L:\\source\\work-app",
     "Notes": "Client account",
+    "RunProxied": true,
     "CreatedAt": "2026-06-30T12:00:00"
   }
 ]
@@ -166,7 +170,7 @@ Click **Check for updates** in the footer status bar. The manager reads the `# A
 
 On apply, it downloads `cursor-profile-manager.ps1`, `cursor-profile-manager.bat`, and `install-desktop-shortcut.ps1`, replaces them in the folder you launched from, then restarts. Existing `.bat` launchers and Desktop shortcuts keep working.
 
-Current release marker in the main script: `# App-Version: 1.3.6` / `$script:AppVersionId` (also shown in the footer as `v1.3.6`).
+Current release marker in the main script: `# App-Version: 1.3.9` / `$script:AppVersionId` (also shown in the footer as `v1.3.9`).
 
 ## Unit tests
 
@@ -198,6 +202,7 @@ Tests use a temporary profiles directory — your real `~/.cursor-profiles` data
 | `screenshots/` | README screenshots of the GUI |
 | `CHANGELOG.md` | User-facing change history |
 | `AGENTS.md` | Guide for AI agents and PowerShell conventions in this repo |
+| `agent-story/` | MITM proxy + web dashboard for intercepting Cursor AI traffic (started from toolbar) |
 
 ## Notes
 
