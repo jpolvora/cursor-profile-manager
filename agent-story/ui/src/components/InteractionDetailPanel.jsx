@@ -20,6 +20,7 @@ import MarkdownRenderer from './MarkdownRenderer';
 import {
   decodeBodyPreview,
   extractMarkdownFromParsed,
+  formatLocaleDateTime,
   getInteractionSummary,
   shortInstance,
   tryParseJSON
@@ -111,7 +112,7 @@ function DetailContent({ interaction }) {
         <div className="detail-url" title={interaction.url}>{interaction.url}</div>
         <div className="detail-timestamp">
           <Clock size={13} />
-          {new Date(interaction.timestamp).toLocaleString()}
+          {formatLocaleDateTime(interaction.timestamp)}
         </div>
       </div>
 

@@ -13,13 +13,14 @@
     .\cursor-profile-manager.ps1
 #>
 param(
-    [switch]$FunctionsOnly
+    [switch]$FunctionsOnly,
+    [switch]$StartMinimized
 )
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 2.0.9
-$script:AppVersionId = '2.0.9'
+# App-Version: 2.0.10
+$script:AppVersionId = '2.0.10'
 $script:AppDisplayName = 'Cursor Profile Manager'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
@@ -251,6 +252,14 @@ $script:UiIdleColor = [System.Drawing.Color]::FromArgb(120, 124, 130)
 $script:UiInputBackColor = [System.Drawing.Color]::White
 $script:UiInputForeColor = [System.Drawing.Color]::FromArgb(32, 33, 36)
 $script:UiThemeComboSync = $false
+$script:MinimizeToTray = $false
+$script:AutoStartWithWindows = $false
+$script:AppOptionsCheckSync = $false
+$script:TrayNotifyIcon = $null
+$script:TrayMinimizeSync = $false
+$script:UiExitConfirmed = $false
+$script:ChkMinimizeToTray = $null
+$script:ChkAutoStartWithWindows = $null
 
 function Get-UiThemePalettes {
     return @{
@@ -630,16 +639,26 @@ function Load-AppSettings {
         if ($theme -eq 'light' -or $theme -eq 'dark' -or $theme -eq 'default') {
             $script:UiThemePreference = $theme
         }
+        if ($null -ne $data.PSObject.Properties['MinimizeToTray']) {
+            $script:MinimizeToTray = [bool]$data.MinimizeToTray
+        }
+        if ($null -ne $data.PSObject.Properties['AutoStartWithWindows']) {
+            $script:AutoStartWithWindows = [bool]$data.AutoStartWithWindows
+        }
     }
     catch {
         Write-Warning "Failed to read settings.json: $($_.Exception.Message)"
     }
+
+    Sync-AppAutoStartRegistration
 }
 
 function Save-AppSettings {
     Ensure-ProfilesRoot
     $settings = [PSCustomObject]@{
-        Theme = $script:UiThemePreference
+        Theme                 = $script:UiThemePreference
+        MinimizeToTray        = [bool]$script:MinimizeToTray
+        AutoStartWithWindows  = [bool]$script:AutoStartWithWindows
     }
     try {
         $settings | ConvertTo-Json -Depth 3 | Set-Content -Path $SettingsPath -Encoding UTF8
@@ -650,6 +669,206 @@ function Save-AppSettings {
             'Save Error',
             'OK',
             'Error') | Out-Null
+    }
+}
+
+function Get-AppAutoStartRegistryPath {
+    return 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+}
+
+function Get-AppAutoStartValueName {
+    return 'CursorProfileManager'
+}
+
+function Get-AppLaunchArguments {
+    param([switch]$ForAutoStart)
+
+    $scriptPath = Join-Path $script:InstallRoot 'cursor-profile-manager.ps1'
+    $parts = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-WindowStyle', 'Hidden',
+        '-File', "`"$scriptPath`""
+    )
+    if ($ForAutoStart -and $script:MinimizeToTray) {
+        $parts += '-StartMinimized'
+    }
+    return ($parts -join ' ')
+}
+
+function Test-AppAutoStartEnabled {
+    $regPath = Get-AppAutoStartRegistryPath
+    $valueName = Get-AppAutoStartValueName
+    try {
+        $current = Get-ItemProperty -Path $regPath -Name $valueName -ErrorAction Stop
+        return ($null -ne $current.$valueName)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Sync-AppAutoStartRegistration {
+    $shouldRun = [bool]$script:AutoStartWithWindows
+    $isRegistered = Test-AppAutoStartEnabled
+    if ($shouldRun -eq $isRegistered) {
+        if ($shouldRun) {
+            Set-AppAutoStartEnabled -Enabled $true
+        }
+        return
+    }
+    Set-AppAutoStartEnabled -Enabled $shouldRun
+}
+
+function Set-AppAutoStartEnabled {
+    param([bool]$Enabled)
+
+    $regPath = Get-AppAutoStartRegistryPath
+    $valueName = Get-AppAutoStartValueName
+    if ($Enabled) {
+        $target = (Get-Command powershell.exe).Source
+        $arguments = Get-AppLaunchArguments -ForAutoStart
+        Set-ItemProperty -Path $regPath -Name $valueName -Value "`"$target`" $arguments"
+    }
+    else {
+        Remove-ItemProperty -Path $regPath -Name $valueName -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-AppExitConfirmationRequired {
+    return (Test-AgentStoryProxyRunning)
+}
+
+function Confirm-AppExitIfNeeded {
+    if (-not (Test-AppExitConfirmationRequired)) {
+        return $true
+    }
+
+    $result = [System.Windows.Forms.MessageBox]::Show(
+        "The Agent Story proxy is running.`n`nExit anyway? Closing the manager stops the proxy and dashboard.",
+        (Get-AppDisplayName),
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+    return ($result -eq [System.Windows.Forms.DialogResult]::Yes)
+}
+
+function Hide-MainWindowToTray {
+    if (-not $form) { return }
+
+    Initialize-AppTrayIcon
+    $script:TrayMinimizeSync = $true
+    try {
+        $form.Hide()
+        $form.ShowInTaskbar = $false
+        if ($script:TrayNotifyIcon) {
+            $script:TrayNotifyIcon.Visible = $true
+            $script:TrayNotifyIcon.ShowBalloonTip(
+                3000,
+                (Get-AppDisplayName),
+                'Running in the notification area.',
+                [System.Windows.Forms.ToolTipIcon]::Info
+            ) | Out-Null
+        }
+    }
+    finally {
+        $script:TrayMinimizeSync = $false
+    }
+}
+
+function Show-MainWindowFromTray {
+    if (-not $form) { return }
+
+    $form.ShowInTaskbar = $true
+    $form.Show()
+    $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
+    $form.Activate()
+    if ($script:TrayNotifyIcon) {
+        $script:TrayNotifyIcon.Visible = $false
+    }
+}
+
+function Initialize-AppTrayIcon {
+    if ($script:TrayNotifyIcon) { return }
+
+    $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
+    $cursorPath = Find-CursorExecutable
+    if ($cursorPath) {
+        $notifyIcon.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($cursorPath)
+    }
+    elseif ($form -and $form.Icon) {
+        $notifyIcon.Icon = $form.Icon
+    }
+    $notifyIcon.Text = Get-AppWindowTitle
+    $notifyIcon.Visible = $false
+
+    $menu = New-Object System.Windows.Forms.ContextMenuStrip
+    $showItem = New-Object System.Windows.Forms.ToolStripMenuItem
+    $showItem.Text = 'Show'
+    $showItem.Add_Click({ Show-MainWindowFromTray })
+    $exitItem = New-Object System.Windows.Forms.ToolStripMenuItem
+    $exitItem.Text = 'Exit'
+    $exitItem.Add_Click({
+        if (-not (Confirm-AppExitIfNeeded)) { return }
+        $script:UiExitConfirmed = $true
+        if ($form) { $form.Close() }
+    })
+    [void]$menu.Items.Add($showItem)
+    [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+    [void]$menu.Items.Add($exitItem)
+    $notifyIcon.ContextMenuStrip = $menu
+    $notifyIcon.Add_DoubleClick({ Show-MainWindowFromTray })
+
+    $script:TrayNotifyIcon = $notifyIcon
+}
+
+function Sync-AppOptionsCheckboxes {
+    if (-not $script:ChkMinimizeToTray -and -not $script:ChkAutoStartWithWindows) { return }
+
+    $script:AppOptionsCheckSync = $true
+    try {
+        if ($script:ChkMinimizeToTray) {
+            $script:ChkMinimizeToTray.Checked = [bool]$script:MinimizeToTray
+        }
+        if ($script:ChkAutoStartWithWindows) {
+            $script:ChkAutoStartWithWindows.Checked = [bool]$script:AutoStartWithWindows
+        }
+    }
+    finally {
+        $script:AppOptionsCheckSync = $false
+    }
+}
+
+function Set-AppMinimizeToTrayPreference {
+    param(
+        [bool]$Enabled,
+        [switch]$Persist
+    )
+
+    $script:MinimizeToTray = $Enabled
+    Sync-AppOptionsCheckboxes
+
+    if ($script:AutoStartWithWindows) {
+        Set-AppAutoStartEnabled -Enabled $true
+    }
+
+    if ($Persist) {
+        Save-AppSettings
+    }
+}
+
+function Set-AppAutoStartPreference {
+    param(
+        [bool]$Enabled,
+        [switch]$Persist
+    )
+
+    $script:AutoStartWithWindows = $Enabled
+    Set-AppAutoStartEnabled -Enabled $Enabled
+    Sync-AppOptionsCheckboxes
+
+    if ($Persist) {
+        Save-AppSettings
     }
 }
 
@@ -769,6 +988,14 @@ function Apply-ToolbarTheme {
     if ($script:ThemeCombo) {
         $script:ThemeCombo.BackColor = $script:UiInputBackColor
         $script:ThemeCombo.ForeColor = $script:UiInputForeColor
+    }
+    if ($script:ChkMinimizeToTray) {
+        $script:ChkMinimizeToTray.ForeColor = $script:UiTextPrimary
+        $script:ChkMinimizeToTray.BackColor = $script:UiPanelColor
+    }
+    if ($script:ChkAutoStartWithWindows) {
+        $script:ChkAutoStartWithWindows.ForeColor = $script:UiTextPrimary
+        $script:ChkAutoStartWithWindows.BackColor = $script:UiPanelColor
     }
 }
 
@@ -3376,7 +3603,7 @@ $script:LaunchTable.RowCount = 1
 $script:LaunchTable.ColumnCount = 2
 $script:LaunchTable.Margin = New-Object System.Windows.Forms.Padding 0
 $script:LaunchTable.Padding = New-Object System.Windows.Forms.Padding 0
-[void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 188)))
+[void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 430)))
 [void]$script:LaunchTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
 
 $script:ThemeFlow = New-Object System.Windows.Forms.FlowLayoutPanel
@@ -3532,6 +3759,31 @@ $script:ThemeCombo.Add_SelectedIndexChanged({
 })
 $script:ThemeFlow.Controls.AddRange(@($script:ThemeLabel, $script:ThemeCombo))
 
+$script:ChkMinimizeToTray = New-Object System.Windows.Forms.CheckBox
+$script:ChkMinimizeToTray.Text = 'Minimize to tray'
+$script:ChkMinimizeToTray.AutoSize = $true
+$script:ChkMinimizeToTray.Margin = New-Object System.Windows.Forms.Padding 12, 6, 0, 0
+$script:ChkMinimizeToTray.ForeColor = $script:UiTextPrimary
+$script:ChkMinimizeToTray.BackColor = $script:UiPanelColor
+$script:ChkMinimizeToTray.Add_CheckedChanged({
+    if ($script:AppOptionsCheckSync) { return }
+    Set-AppMinimizeToTrayPreference -Enabled $script:ChkMinimizeToTray.Checked -Persist
+})
+
+$script:ChkAutoStartWithWindows = New-Object System.Windows.Forms.CheckBox
+$script:ChkAutoStartWithWindows.Text = 'Start with Windows'
+$script:ChkAutoStartWithWindows.AutoSize = $true
+$script:ChkAutoStartWithWindows.Margin = New-Object System.Windows.Forms.Padding 12, 6, 0, 0
+$script:ChkAutoStartWithWindows.ForeColor = $script:UiTextPrimary
+$script:ChkAutoStartWithWindows.BackColor = $script:UiPanelColor
+$script:ChkAutoStartWithWindows.Add_CheckedChanged({
+    if ($script:AppOptionsCheckSync) { return }
+    Set-AppAutoStartPreference -Enabled $script:ChkAutoStartWithWindows.Checked -Persist
+})
+
+$script:ThemeFlow.Controls.AddRange(@($script:ChkMinimizeToTray, $script:ChkAutoStartWithWindows))
+Sync-AppOptionsCheckboxes
+
 Apply-ToolbarTheme
 
 $btnAdd.Add_Click({
@@ -3610,11 +3862,41 @@ $refreshTimer.Start()
 
 Start-CursorProcessWatchers -OwnerForm $form -DebounceTimer $processEventDebounce
 
+$form.Add_Resize({
+    if ($script:TrayMinimizeSync) { return }
+    if (-not $script:MinimizeToTray) { return }
+    if ($form.WindowState -ne [System.Windows.Forms.FormWindowState]::Minimized) { return }
+    Hide-MainWindowToTray
+})
+
 $form.Add_FormClosing({
+    param($sender, $e)
+
+    if ($script:UiShuttingDown) { return }
+
+    if ($script:MinimizeToTray -and -not $script:UiExitConfirmed -and $e.CloseReason -eq [System.Windows.Forms.CloseReason]::UserClosing) {
+        $e.Cancel = $true
+        Hide-MainWindowToTray
+        return
+    }
+
+    if (-not $script:UiExitConfirmed) {
+        if (-not (Confirm-AppExitIfNeeded)) {
+            $e.Cancel = $true
+            return
+        }
+        $script:UiExitConfirmed = $true
+    }
+
     $script:UiShuttingDown = $true
     $refreshTimer.Stop()
     $processEventDebounce.Stop()
     Stop-CursorProcessWatchers
+    if ($script:TrayNotifyIcon) {
+        $script:TrayNotifyIcon.Visible = $false
+        $script:TrayNotifyIcon.Dispose()
+        $script:TrayNotifyIcon = $null
+    }
     Stop-AgentStory
 })
 
@@ -3624,7 +3906,15 @@ Update-CursorInstallUi
 Update-ProfileGrid
 Update-AgentStoryUiState
 
-    [void]$form.ShowDialog()
+if ($StartMinimized -and $script:MinimizeToTray) {
+    $form.Add_Shown({
+        if ($script:MinimizeToTray) {
+            Hide-MainWindowToTray
+        }
+    })
+}
+
+[void]$form.ShowDialog()
 }
 catch {
     Show-StartupFailure -Message "Cursor Profile Manager failed to start:`n`n$($_.Exception.Message)"

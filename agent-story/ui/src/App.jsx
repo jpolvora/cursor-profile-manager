@@ -37,7 +37,14 @@ export default function App() {
 
   const projects = useProjects(sidebarRefreshToken);
 
-  const fetchInteractions = useCallback(async () => {
+  const hasLoadedOnceRef = useRef(false);
+
+  const fetchInteractions = useCallback(async (options = {}) => {
+    const { showLoading = false } = options;
+    if (showLoading && !hasLoadedOnceRef.current) {
+      setLoading(true);
+    }
+
     const params = new URLSearchParams();
     if (activeProject) params.set('project', activeProject);
     if (activeInstance) params.set('instance', activeInstance);
@@ -55,6 +62,7 @@ export default function App() {
       const data = await res.json();
       setInteractions(data);
       setError(null);
+      hasLoadedOnceRef.current = true;
       setSelectedId(prev => {
         if (prev == null) return null;
         return data.some(row => row.id === prev) ? prev : null;
@@ -67,8 +75,7 @@ export default function App() {
   }, [activeProject, activeInstance, activeThread, searchTerm, methodFilter]);
 
   useEffect(() => {
-    setLoading(true);
-    fetchInteractions();
+    fetchInteractions({ showLoading: true });
   }, [fetchInteractions]);
 
   const debouncedRefresh = useDebouncedCallback(() => {

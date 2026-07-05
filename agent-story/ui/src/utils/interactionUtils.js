@@ -83,10 +83,44 @@ export function getInteractionSummary(interaction) {
   };
 }
 
+/** Parse DB/API timestamps stored as UTC (ISO or SQLite "YYYY-MM-DD HH:MM:SS"). */
+export function parseUtcTimestamp(timestamp) {
+  if (timestamp == null || timestamp === '') return null;
+  const normalized = String(timestamp).includes('T')
+    ? String(timestamp)
+    : String(timestamp).trim().replace(' ', 'T') + 'Z';
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function formatLocaleDateTime(timestamp, options) {
+  const date = parseUtcTimestamp(timestamp);
+  if (!date) return '—';
+  return date.toLocaleString(undefined, options);
+}
+
 export function formatGridTime(timestamp) {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return formatLocaleDateTime(timestamp, {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+}
+
+export function formatLastSeen(timestamp) {
+  const date = parseUtcTimestamp(timestamp);
+  if (!date) return '';
+  const now = Date.now();
+  const diffMs = now - date.getTime();
+  if (diffMs < 60_000) return 'just now';
+  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)}m ago`;
+  if (diffMs < 86_400_000) {
+    return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 export function formatMs(value) {

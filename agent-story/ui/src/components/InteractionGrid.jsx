@@ -103,7 +103,7 @@ export default function InteractionGrid({
     [interactions, virtualRange.start, virtualRange.end]
   );
 
-  if (loading) {
+  if (loading && interactions.length === 0) {
     return <div className="grid-panel loading">Listening for Cursor traffic...</div>;
   }
 

@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const {
   insertInteraction,
+  updateInteraction,
   getInteractions,
   searchInteractions,
   getThreads,
@@ -12,7 +13,7 @@ const {
   getLatestInteractionId
 } = require('./db');
 const { extractInteractionContext } = require('./metadata');
-const { shouldCaptureHost, buildCaptureRecord, isStreamingContentType } = require('./capture');
+const { shouldCaptureHost, buildCaptureRecord, isStreamingContentType, bufferToStorage } = require('./capture');
 const {
   registerProfileSession,
   unregisterProfileSession,
@@ -54,6 +55,154 @@ function fetchInteractions(filters, limit = 100) {
 
 function notifyClients(event, data) {
   sse.broadcast(event, data);
+}
+
+function snapshotCaptureContext(ctx, resChunks) {
+  return {
+    captureKey: ctx.captureKey,
+    provisionalRowId: ctx.provisionalRowId || null,
+    requestStartTime: ctx.requestStartTime,
+    firstChunkTime: ctx.firstChunkTime,
+    totalResponseBytes: ctx.totalResponseBytes,
+    isSSL: ctx.isSSL,
+    profileContext: ctx.profileContext,
+    reqBody: ctx.reqBody ? Buffer.from(ctx.reqBody) : Buffer.alloc(0),
+    resBody: Buffer.concat(resChunks),
+    method: ctx.clientToProxyRequest.method,
+    url: ctx.clientToProxyRequest.url || '',
+    reqHeaders: { ...ctx.clientToProxyRequest.headers },
+    resStatusCode: ctx.serverToProxyResponse?.statusCode || 0,
+    resHeaders: { ...(ctx.serverToProxyResponse?.headers || {}) },
+    host: ctx.clientToProxyRequest.headers.host || ''
+  };
+}
+
+function buildCaptureRecordFromSnapshot(snapshot) {
+  return buildCaptureRecord({
+    clientToProxyRequest: {
+      method: snapshot.method,
+      url: snapshot.url,
+      headers: snapshot.reqHeaders
+    },
+    serverToProxyResponse: {
+      statusCode: snapshot.resStatusCode,
+      headers: snapshot.resHeaders
+    },
+    isSSL: snapshot.isSSL,
+    requestStartTime: snapshot.requestStartTime,
+    firstChunkTime: snapshot.firstChunkTime,
+    totalResponseBytes: snapshot.totalResponseBytes,
+    reqBody: snapshot.reqBody,
+    resBody: snapshot.resBody
+  });
+}
+
+function persistCaptureRecord(snapshot) {
+  const record = buildCaptureRecordFromSnapshot(snapshot);
+  const durationMs = Date.now() - (snapshot.requestStartTime || Date.now());
+  const profileContext = snapshot.profileContext;
+  const context = extractInteractionContext(
+    snapshot.reqHeaders,
+    record.request_body,
+    {
+      duration_ms: durationMs,
+      response_status: record.response_status,
+      host: snapshot.host,
+      capture: record.capture,
+      profileContext
+    }
+  );
+
+  const rowPayload = {
+    method: record.method,
+    url: record.url,
+    request_headers: record.request_headers,
+    request_body: record.request_body,
+    response_status: record.response_status,
+    response_headers: record.response_headers,
+    response_body: record.response_body,
+    project_key: context.project_key,
+    instance_key: context.instance_key,
+    metadata: context.metadata
+  };
+
+  let rowId = snapshot.provisionalRowId;
+  if (rowId) {
+    updateInteraction.run({ ...rowPayload, id: rowId });
+  } else {
+    const result = insertInteraction.run(rowPayload);
+    rowId = Number(result.lastInsertRowid);
+  }
+
+  const interactionPayload = {
+    id: rowId,
+    project_key: context.project_key,
+    instance_key: context.instance_key,
+    capture_key: snapshot.captureKey,
+    streaming: record.capture.response.streaming,
+    tokens_per_second: record.capture.response.tokens_per_second
+  };
+
+  notifyClients('interaction', interactionPayload);
+
+  const resSummary = record.capture.response;
+  console.log(
+    `[Proxy] #${rowId} ${record.method} ${record.url}` +
+    (context.project_key ? ` [${context.project_key.split('/').pop()}]` : ' [unassigned]') +
+    (resSummary.streaming ? ' [stream]' : '') +
+    (resSummary.tokens_per_second ? ` ${resSummary.tokens_per_second} tok/s` : '') +
+    ` ${durationMs}ms`
+  );
+}
+
+function insertProvisionalStreamingCapture(ctx, host) {
+  if (ctx.provisionalRowId) return;
+
+  const profileContext = ctx.profileContext || resolveProfileContextForCapture(ctx, PROXY_PORT);
+  const urlStr = (ctx.isSSL ? 'https://' : 'http://') + host + (ctx.clientToProxyRequest.url || '');
+  const reqStorage = ctx.reqBody ? bufferToStorage(ctx.reqBody) : { text: '' };
+  const context = extractInteractionContext(
+    ctx.clientToProxyRequest.headers,
+    reqStorage.text,
+    {
+      duration_ms: Date.now() - (ctx.requestStartTime || Date.now()),
+      response_status: ctx.serverToProxyResponse?.statusCode || 0,
+      host,
+      profileContext
+    }
+  );
+
+  let metadata = {};
+  try {
+    metadata = JSON.parse(context.metadata);
+  } catch {
+    metadata = {};
+  }
+  metadata.streaming_in_progress = true;
+
+  const result = insertInteraction.run({
+    method: ctx.clientToProxyRequest.method,
+    url: urlStr,
+    request_headers: JSON.stringify(ctx.clientToProxyRequest.headers),
+    request_body: reqStorage.text,
+    response_status: ctx.serverToProxyResponse?.statusCode || 0,
+    response_headers: JSON.stringify(ctx.serverToProxyResponse?.headers || {}),
+    response_body: '',
+    project_key: context.project_key,
+    instance_key: context.instance_key,
+    metadata: JSON.stringify(metadata)
+  });
+
+  ctx.provisionalRowId = Number(result.lastInsertRowid);
+
+  notifyClients('interaction', {
+    id: ctx.provisionalRowId,
+    project_key: context.project_key,
+    instance_key: context.instance_key,
+    capture_key: ctx.captureKey,
+    streaming: true,
+    provisional: true
+  });
 }
 
 // SSE stream for live UI updates
@@ -214,6 +363,9 @@ proxy.onRequest(function(ctx, callback) {
 
     const resContentType = ctx.serverToProxyResponse?.headers?.['content-type'];
     if (isStreamingContentType(resContentType)) {
+      if (!ctx.provisionalRowId) {
+        insertProvisionalStreamingCapture(ctx, host);
+      }
       notifyClients('stream-progress', {
         capture_key: ctx.captureKey,
         url: (ctx.isSSL ? 'https://' : 'http://') + host + (ctx.clientToProxyRequest.url || ''),
@@ -228,61 +380,16 @@ proxy.onRequest(function(ctx, callback) {
   });
 
   ctx.onResponseEnd(function(ctx, callback) {
-    ctx.resBody = Buffer.concat(resChunks);
+    const snapshot = snapshotCaptureContext(ctx, resChunks);
+    callback();
 
-    try {
-      const record = buildCaptureRecord(ctx);
-      const durationMs = Date.now() - (ctx.requestStartTime || Date.now());
-      const profileContext = ctx.profileContext || resolveProfileContextForCapture(ctx, PROXY_PORT);
-      const context = extractInteractionContext(
-        ctx.clientToProxyRequest.headers,
-        record.request_body,
-        {
-          duration_ms: durationMs,
-          response_status: record.response_status,
-          host,
-          capture: record.capture,
-          profileContext
-        }
-      );
-
-      const result = insertInteraction.run({
-        method: record.method,
-        url: record.url,
-        request_headers: record.request_headers,
-        request_body: record.request_body,
-        response_status: record.response_status,
-        response_headers: record.response_headers,
-        response_body: record.response_body,
-        project_key: context.project_key,
-        instance_key: context.instance_key,
-        metadata: context.metadata
-      });
-
-      const interactionPayload = {
-        id: Number(result.lastInsertRowid),
-        project_key: context.project_key,
-        instance_key: context.instance_key,
-        capture_key: ctx.captureKey,
-        streaming: record.capture.response.streaming,
-        tokens_per_second: record.capture.response.tokens_per_second
-      };
-
-      notifyClients('interaction', interactionPayload);
-
-      const resSummary = record.capture.response;
-      console.log(
-        `[Proxy] #${result.lastInsertRowid} ${record.method} ${record.url}` +
-        (context.project_key ? ` [${context.project_key.split('/').pop()}]` : ' [unassigned]') +
-        (resSummary.streaming ? ' [stream]' : '') +
-        (resSummary.tokens_per_second ? ` ${resSummary.tokens_per_second} tok/s` : '') +
-        ` ${durationMs}ms`
-      );
-    } catch (err) {
-      console.error('Capture Error:', err);
-    }
-
-    return callback();
+    setImmediate(() => {
+      try {
+        persistCaptureRecord(snapshot);
+      } catch (err) {
+        console.error('Capture Error:', err);
+      }
+    });
   });
 
   return callback();

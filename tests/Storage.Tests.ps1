@@ -94,5 +94,21 @@ Describe 'Profile and settings storage' {
 
             $script:UiThemePreference | Should Be 'light'
         }
+
+        It 'loads minimize-to-tray and auto-start preferences' {
+            $settingsPath = Join-Path $global:ProfileManagerTestProfilesDir 'settings.json'
+            @{
+                Theme                = 'default'
+                MinimizeToTray       = $true
+                AutoStartWithWindows = $true
+            } | ConvertTo-Json | Set-Content -Path $settingsPath -Encoding UTF8
+
+            $script:MinimizeToTray = $false
+            $script:AutoStartWithWindows = $false
+            Load-AppSettings
+
+            $script:MinimizeToTray | Should Be $true
+            $script:AutoStartWithWindows | Should Be $true
+        }
     }
 }

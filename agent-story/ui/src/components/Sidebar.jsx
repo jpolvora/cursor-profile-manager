@@ -1,22 +1,11 @@
 import { useState, useEffect } from 'react';
 import { FolderKanban, ChevronDown, ChevronRight, Monitor } from 'lucide-react';
+import { formatLastSeen } from '../utils/interactionUtils';
 
 function shortInstance(key) {
   if (!key) return 'Unknown session';
   if (key.length <= 14) return key;
   return key.slice(0, 8) + '…' + key.slice(-4);
-}
-
-function formatLastSeen(timestamp) {
-  if (!timestamp) return '';
-  const date = new Date(timestamp.includes('T') ? timestamp : timestamp.replace(' ', 'T') + 'Z');
-  if (Number.isNaN(date.getTime())) return '';
-  const now = Date.now();
-  const diffMs = now - date.getTime();
-  if (diffMs < 60_000) return 'just now';
-  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)}m ago`;
-  if (diffMs < 86_400_000) return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
 export default function Sidebar({

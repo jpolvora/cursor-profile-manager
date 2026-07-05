@@ -4,10 +4,23 @@ All notable user-facing changes to Cursor Profile Manager.
 
 Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (when applicable). Newest dates first.
 
+## 2.0.10
+
+### Added
+
+- **Exit confirmation** — closing the manager while the Agent Story proxy is running shows a confirmation dialog before stopping the proxy and dashboard.
+- **Minimize to tray** — optional toolbar setting hides the window in the notification area when minimized or closed; double-click the tray icon or choose **Show** to restore.
+- **Start with Windows** — optional toolbar setting registers the manager in the current user's Windows startup programs (`HKCU\...\Run`).
+
+### Changed
+
+- Release marker bumped to **2.0.10** (`# App-Version` / `$script:AppVersionId`).
+
 ## 2.0.9
 
 ### Fixed
 
+- **Agent Story live log display** — dashboard API reads no longer block behind proxy capture writes (separate SQLite read connection); streaming requests appear in the grid as soon as the first chunk arrives instead of only after the IDE closes; the grid keeps showing existing rows while refreshing instead of staying on the loading spinner during heavy traffic.
 - **Start Profile launch error** — resolved a null reference error ("You cannot call a method on a null-valued expression") in `Get-ProfileInstanceCount` that occurred when registering running proxied profiles.
 - **Diagnostics cleanup** — reverted temporary test hooks and startup/launch file logging intercepts.
 

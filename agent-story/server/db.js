@@ -3,8 +3,11 @@ const path = require('path');
 
 const dbPath = path.resolve(__dirname, 'agent-story.db');
 const db = new Database(dbPath);
+const readDb = new Database(dbPath, { readonly: true });
 
 db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');
+readDb.pragma('busy_timeout = 5000');
 
 function ensureColumn(table, column, definition) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -39,22 +42,48 @@ db.exec(`
     INSERT INTO interactions_fts(interactions_fts, rowid, url, request_body, response_body)
     VALUES ('delete', old.id, old.url, old.request_body, old.response_body);
   END;
+
+  CREATE TRIGGER IF NOT EXISTS interactions_au AFTER UPDATE ON interactions BEGIN
+    INSERT INTO interactions_fts(interactions_fts, rowid, url, request_body, response_body)
+    VALUES ('delete', old.id, old.url, old.request_body, old.response_body);
+    INSERT INTO interactions_fts(rowid, url, request_body, response_body)
+    VALUES (new.id, new.url, new.request_body, new.response_body);
+  END;
 `);
 
 ensureColumn('interactions', 'project_key', 'TEXT');
 ensureColumn('interactions', 'instance_key', 'TEXT');
 ensureColumn('interactions', 'metadata', 'TEXT');
 
-const insertInteraction = db.prepare(`
+const insertInteractionStmt = db.prepare(`
   INSERT INTO interactions (
     method, url, request_headers, request_body,
     response_status, response_headers, response_body,
-    project_key, instance_key, metadata
+    project_key, instance_key, metadata, timestamp
   ) VALUES (
     @method, @url, @request_headers, @request_body,
     @response_status, @response_headers, @response_body,
-    @project_key, @instance_key, @metadata
+    @project_key, @instance_key, @metadata, @timestamp
   )
+`);
+
+function insertInteraction(row) {
+  return insertInteractionStmt.run({
+    ...row,
+    timestamp: row.timestamp || new Date().toISOString()
+  });
+}
+
+const updateInteraction = db.prepare(`
+  UPDATE interactions SET
+    request_body = @request_body,
+    response_status = @response_status,
+    response_headers = @response_headers,
+    response_body = @response_body,
+    project_key = @project_key,
+    instance_key = @instance_key,
+    metadata = @metadata
+  WHERE id = @id
 `);
 
 function buildInteractionFilters({ thread, project, instance, q, method }) {
@@ -94,7 +123,7 @@ function queryInteractions(filters, limit = 100) {
     const ftsWhere = where
       ? `${where} AND interactions_fts MATCH ? AND i.method LIKE ?`
       : 'WHERE interactions_fts MATCH ? AND i.method LIKE ?';
-    return db.prepare(`
+    return readDb.prepare(`
       SELECT i.* FROM interactions i
       JOIN interactions_fts fts ON fts.rowid = i.id
       ${ftsWhere}
@@ -103,7 +132,7 @@ function queryInteractions(filters, limit = 100) {
     `).all(...params, q + '*', methodLike, limit);
   }
 
-  return db.prepare(`
+  return readDb.prepare(`
     SELECT * FROM interactions
     ${where}
     ORDER BY id DESC
@@ -120,7 +149,7 @@ const searchInteractions = {
     queryInteractions({ ...extraFilters, q, method: methodFilter === '%' ? 'ALL' : methodFilter }, limit)
 };
 
-const getThreads = db.prepare(`
+const getThreads = readDb.prepare(`
   SELECT
     SUBSTR(url, 1, INSTR(url || '?', '?') - 1) AS thread_key,
     COUNT(*) AS count,
@@ -131,14 +160,14 @@ const getThreads = db.prepare(`
   ORDER BY last_timestamp DESC
 `);
 
-const getInteractionsByThread = db.prepare(`
+const getInteractionsByThread = readDb.prepare(`
   SELECT * FROM interactions
   WHERE SUBSTR(url, 1, INSTR(url || '?', '?') - 1) = ?
   ORDER BY id DESC
   LIMIT ?
 `);
 
-const getProjects = db.prepare(`
+const getProjects = readDb.prepare(`
   SELECT
     COALESCE(NULLIF(project_key, ''), '__unassigned__') AS project_key,
     COUNT(*) AS count,
@@ -149,7 +178,7 @@ const getProjects = db.prepare(`
   ORDER BY last_timestamp DESC
 `);
 
-const getInstances = db.prepare(`
+const getInstances = readDb.prepare(`
   SELECT
     instance_key,
     project_key,
@@ -163,13 +192,15 @@ const getInstances = db.prepare(`
   ORDER BY last_timestamp DESC
 `);
 
-const getLatestInteractionId = db.prepare(`
+const getLatestInteractionId = readDb.prepare(`
   SELECT MAX(id) AS max_id FROM interactions
 `);
 
 module.exports = {
   db,
+  readDb,
   insertInteraction,
+  updateInteraction,
   getInteractions,
   searchInteractions,
   getThreads,
