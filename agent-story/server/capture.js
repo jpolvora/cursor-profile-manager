@@ -394,7 +394,19 @@ function zlibBrotli(buffer) {
 }
 
 function shouldCaptureHost(host) {
-  return true;
+  const h = String(host || '').toLowerCase();
+  
+  const aiDomains = [
+    'cursor',
+    'openai.com',
+    'anthropic.com',
+    'claude.ai',
+    'google.com', // for gemini
+    'x.ai',
+    'api.mistral.ai'
+  ];
+
+  return aiDomains.some(domain => h.includes(domain));
 }
 
 function buildCaptureRecord(ctx) {

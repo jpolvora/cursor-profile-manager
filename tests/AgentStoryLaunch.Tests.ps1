@@ -126,7 +126,7 @@ Describe 'Cursor proxy launch helpers' {
             $envVars.HTTP_PROXY | Should Be 'http://127.0.0.1:8080'
             $envVars.HTTPS_PROXY | Should Be 'http://127.0.0.1:8080'
             $envVars.NODE_TLS_REJECT_UNAUTHORIZED | Should Be '0'
-            $envVars.NO_PROXY | Should Be 'localhost,127.0.0.1'
+            $envVars.NO_PROXY | Should Be 'localhost,127.0.0.1,.github.com,github.com,.gitlab.com,.bitbucket.org'
         }
     }
 

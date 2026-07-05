@@ -8,10 +8,11 @@ const {
   shouldCaptureHost
 } = require('./capture');
 
-test('shouldCaptureHost captures all domains unconditionally', () => {
+test('shouldCaptureHost matches cursor and AI domains', () => {
   assert.equal(shouldCaptureHost('api2.cursor.sh'), true);
   assert.equal(shouldCaptureHost('agent.api5.cursor.sh'), true);
-  assert.equal(shouldCaptureHost('example.com'), true);
+  assert.equal(shouldCaptureHost('api.openai.com'), true);
+  assert.equal(shouldCaptureHost('example.com'), false);
 });
 
 test('parseSseEvents extracts OpenAI-style stream chunks', () => {

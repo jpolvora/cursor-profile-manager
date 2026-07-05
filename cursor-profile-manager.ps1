@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     GUI manager for isolated Cursor IDE profiles (Cursor 3.x).
@@ -3516,7 +3516,7 @@ function Invoke-UiRefreshSafe {
         & $Action
     }
     catch [System.Management.Automation.PipelineStoppedException] {
-        # Runspace stopping during shutdown — ignore.
+        # Runspace stopping during shutdown â€” ignore.
     }
     catch {
         Write-Warning "UI refresh failed: $($_.Exception.Message)"

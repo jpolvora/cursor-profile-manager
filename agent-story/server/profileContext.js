@@ -15,7 +15,49 @@ const sessionCache = new Map();
 
 let clientPidCache = new Map();
 const CLIENT_PID_CACHE_MAX = 500;
+let profileContextByClientPid = new Map();
+const PROFILE_CONTEXT_CACHE_MAX = 500;
+const PROFILE_CONTEXT_CACHE_MS = 30000;
 let clientPortMapCache = { at: 0, port: DEFAULT_PROXY_PORT, map: new Map() };
+
+function parsePortFromAddress(address) {
+  if (!address) return null;
+  const match = String(address).match(/:(\d+)$/);
+  if (!match) return null;
+  const port = Number(match[1]);
+  return Number.isFinite(port) && port > 0 ? port : null;
+}
+
+function parseNetstatClientPortMap(netstatOutput, proxyPort = DEFAULT_PROXY_PORT) {
+  const map = new Map();
+  const targetPort = Number(proxyPort);
+  if (!netstatOutput || !targetPort) return map;
+
+  for (const line of String(netstatOutput).split(/\r?\n/)) {
+    if (!line.includes('ESTABLISHED')) continue;
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 5 || parts[0] !== 'TCP') continue;
+
+    const remotePort = parsePortFromAddress(parts[2]);
+    const localPort = parsePortFromAddress(parts[1]);
+    const pid = Number(parts[4]);
+    if (remotePort !== targetPort || !localPort || !Number.isFinite(pid) || pid <= 0) {
+      continue;
+    }
+    map.set(localPort, pid);
+  }
+
+  return map;
+}
+
+function readNetstatClientPortMap(proxyPort = DEFAULT_PROXY_PORT) {
+  const output = execFileSync('netstat', ['-ano'], {
+    encoding: 'utf8',
+    timeout: 3000,
+    windowsHide: true
+  });
+  return parseNetstatClientPortMap(output, proxyPort);
+}
 
 function refreshClientPortMap(proxyPort = DEFAULT_PROXY_PORT) {
   const now = Date.now();
@@ -23,33 +65,17 @@ function refreshClientPortMap(proxyPort = DEFAULT_PROXY_PORT) {
     return clientPortMapCache.map;
   }
 
-  const map = new Map();
+  let map = new Map();
   if (process.platform === 'win32') {
     try {
-      const script = [
-        `$out = @{};`,
-        `Get-NetTCPConnection -LocalPort ${Number(proxyPort)} -State Established -ErrorAction SilentlyContinue | ForEach-Object {`,
-        `  $rp = $_.RemotePort;`,
-        `  $client = Get-NetTCPConnection -LocalPort $rp -RemotePort ${Number(proxyPort)} -State Established -ErrorAction SilentlyContinue | Select-Object -First 1;`,
-        `  if ($client) { $out[[string]$rp] = $client.OwningProcess }`,
-        `};`,
-        `$out | ConvertTo-Json -Compress`
-      ].join(' ');
-      const output = runPowerShell(script);
-      if (output) {
-        const parsed = JSON.parse(output.replace(/^\uFEFF/, ''));
-        for (const [remotePort, pid] of Object.entries(parsed)) {
-          const portNum = Number(remotePort);
-          const pidNum = Number(pid);
-          if (portNum > 0 && pidNum > 0) {
-            map.set(portNum, pidNum);
-          }
-        }
-      }
+      map = readNetstatClientPortMap(proxyPort);
     } catch {
-      // keep previous map if refresh fails
-      return clientPortMapCache.map;
+      map = new Map(clientPortMapCache.map);
     }
+  }
+
+  if (map.size === 0 && clientPortMapCache.map.size > 0) {
+    map = new Map(clientPortMapCache.map);
   }
 
   clientPortMapCache = { at: now, port: proxyPort, map };
@@ -228,15 +254,8 @@ function resolveClientProcessId(clientRemotePort, proxyPort = DEFAULT_PROXY_PORT
 
   if (!pid && process.platform === 'win32') {
     try {
-      const script = [
-        `$row = Get-NetTCPConnection -LocalPort ${Number(clientRemotePort)} -RemotePort ${Number(proxyPort)} -State Established -ErrorAction SilentlyContinue | Select-Object -First 1`,
-        'if ($row) { $row.OwningProcess }'
-      ].join('; ');
-      const output = runPowerShell(script);
-      const parsed = parseInt(output, 10);
-      if (Number.isFinite(parsed) && parsed > 0) {
-        pid = parsed;
-      }
+      const freshMap = readNetstatClientPortMap(proxyPort);
+      pid = freshMap.get(Number(clientRemotePort)) || null;
     } catch {
       pid = null;
     }
@@ -288,24 +307,46 @@ function resolveProfileContextFromClientSocket(socket, proxyPort = DEFAULT_PROXY
   const clientPid = resolveClientProcessId(clientRemotePort, proxyPort);
   if (!clientPid) return null;
 
+  const cachedContext = profileContextByClientPid.get(clientPid);
+  if (cachedContext && Date.now() - cachedContext.at < PROFILE_CONTEXT_CACHE_MS) {
+    return cachedContext.context;
+  }
+
   const registeredKey = registryByMainPid.get(clientPid);
   if (registeredKey && registryByUserDataDir.has(registeredKey)) {
-    return { ...registryByUserDataDir.get(registeredKey), source: 'registry-pid', client_pid: clientPid };
+    const context = { ...registryByUserDataDir.get(registeredKey), source: 'registry-pid', client_pid: clientPid };
+    rememberProfileContextForClientPid(clientPid, context);
+    return context;
   }
 
   const userDataDir = resolveUserDataDirFromProcessTree(clientPid);
   if (!userDataDir) return null;
 
   const context = lookupProfileContextByUserDataDir(userDataDir);
-  if (!context) {
-    return buildProfileContext({
+  const resolved = context
+    ? { ...context, client_pid: clientPid }
+    : buildProfileContext({
       userDataDir,
       source: 'process-tree',
       mainProcessId: clientPid
     });
+
+  if (resolved) {
+    rememberProfileContextForClientPid(clientPid, resolved);
   }
 
-  return { ...context, client_pid: clientPid };
+  return resolved;
+}
+
+function rememberProfileContextForClientPid(clientPid, context) {
+  if (!clientPid || !context) return;
+  if (profileContextByClientPid.size >= PROFILE_CONTEXT_CACHE_MAX) {
+    const oldestKey = profileContextByClientPid.keys().next().value;
+    if (oldestKey != null) {
+      profileContextByClientPid.delete(oldestKey);
+    }
+  }
+  profileContextByClientPid.set(clientPid, { at: Date.now(), context });
 }
 
 function rememberSessionProfile(sessionId, profileContext) {
@@ -350,6 +391,7 @@ function clearProfileSessionCaches() {
   registryByMainPid.clear();
   sessionCache.clear();
   clientPidCache.clear();
+  profileContextByClientPid.clear();
   clientPortMapCache = { at: 0, port: DEFAULT_PROXY_PORT, map: new Map() };
 }
 
@@ -431,6 +473,7 @@ module.exports = {
   lookupProfileContextByUserDataDir,
   lookupProfileContextByMainPid,
   parseUserDataDirFromCommandLine,
+  parseNetstatClientPortMap,
   resolveProfileContextFromClientSocket,
   resolveProfileContextForCapture,
   rememberSessionProfile,

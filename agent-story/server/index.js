@@ -58,6 +58,12 @@ function notifyClients(event, data) {
 }
 
 function snapshotCaptureContext(ctx, resChunks) {
+  let profileContext = ctx.profileContext;
+  if (!profileContext) {
+    profileContext = resolveProfileContextForCapture(ctx, PROXY_PORT);
+    ctx.profileContext = profileContext;
+  }
+
   return {
     captureKey: ctx.captureKey,
     provisionalRowId: ctx.provisionalRowId || null,
@@ -65,7 +71,7 @@ function snapshotCaptureContext(ctx, resChunks) {
     firstChunkTime: ctx.firstChunkTime,
     totalResponseBytes: ctx.totalResponseBytes,
     isSSL: ctx.isSSL,
-    profileContext: ctx.profileContext,
+    profileContext,
     reqBody: ctx.reqBody ? Buffer.from(ctx.reqBody) : Buffer.alloc(0),
     resBody: Buffer.concat(resChunks),
     method: ctx.clientToProxyRequest.method,
@@ -130,7 +136,7 @@ function persistCaptureRecord(snapshot) {
   if (rowId) {
     updateInteraction.run({ ...rowPayload, id: rowId });
   } else {
-    const result = insertInteraction.run(rowPayload);
+    const result = insertInteraction(rowPayload);
     rowId = Number(result.lastInsertRowid);
   }
 
@@ -180,7 +186,7 @@ function insertProvisionalStreamingCapture(ctx, host) {
   }
   metadata.streaming_in_progress = true;
 
-  const result = insertInteraction.run({
+  const result = insertInteraction({
     method: ctx.clientToProxyRequest.method,
     url: urlStr,
     request_headers: JSON.stringify(ctx.clientToProxyRequest.headers),
@@ -330,11 +336,38 @@ proxy.onError(function(ctx, err) {
   }
 });
 
+proxy.onConnect(function(req, socket, head, callback) {
+  const hostParts = req.url.split(':');
+  const host = hostParts[0];
+  const port = hostParts[1] || 443;
+
+  if (shouldCaptureHost(host)) {
+    return callback(); // continue to MITM
+  }
+
+  // Bypass MITM (direct tunnel) for non-captured hosts (e.g. github.com)
+  const net = require('net');
+  const conn = net.connect(port, host, () => {
+    socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+    conn.write(head);
+    conn.pipe(socket);
+    socket.pipe(conn);
+  });
+  conn.on('error', (err) => {
+    console.error('Tunnel Error:', host, err.message);
+    socket.end();
+  });
+  socket.on('error', () => {
+    conn.end();
+  });
+});
+
 proxy.onRequest(function(ctx, callback) {
   const host = ctx.clientToProxyRequest.headers.host || '';
   ctx.requestStartTime = Date.now();
   ctx.captureKey = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+  // If a non-captured host slips through (e.g. plain HTTP), just pass it along
   if (!shouldCaptureHost(host)) {
     return callback();
   }

@@ -9,11 +9,25 @@ const {
   lookupProfileContextByUserDataDir,
   lookupProfileContextByMainPid,
   parseUserDataDirFromCommandLine,
+  parseNetstatClientPortMap,
   clearProfileSessionCaches,
   readProfileMarker,
   MARKER_FILENAME
 } = require('./profileContext');
 const { extractInteractionContext } = require('./metadata');
+
+test('parseNetstatClientPortMap maps client local ports to owning PIDs', () => {
+  const sample = [
+    '  TCP    127.0.0.1:51938        127.0.0.1:8080         ESTABLISHED     12020',
+    '  TCP    127.0.0.1:8080         127.0.0.1:51938        ESTABLISHED     7328',
+    '  TCP    127.0.0.1:60547        127.0.0.1:8080         ESTABLISHED     22476'
+  ].join('\n');
+
+  const map = parseNetstatClientPortMap(sample, 8080);
+  assert.equal(map.get(51938), 12020);
+  assert.equal(map.get(60547), 22476);
+  assert.equal(map.get(7328), undefined);
+});
 
 test('parseUserDataDirFromCommandLine reads quoted and unquoted values', () => {
   const quoted = parseUserDataDirFromCommandLine('"C:\\Program Files\\cursor\\Cursor.exe" --user-data-dir="D:\\cursor\\work" --new-window');
