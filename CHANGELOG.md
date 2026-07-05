@@ -4,6 +4,18 @@ All notable user-facing changes to Cursor Profile Manager.
 
 Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (when applicable). Newest dates first.
 
+## 2.0.2
+
+### Added
+
+- **Open dashboard** link on the toolbar — appears when the Agent Story UI is listening on port 5173; opens `http://localhost:5173/` in your default browser (`AGENT_STORY_UI_URL` overrides the URL).
+
+## 2.0.1
+
+### Changed
+
+- **Agent Story toolbar toggle** — the toolbar button detects running Agent Story via process handles **and** listening ports (8080, 3001, 5173), so it shows **Stop Agent Story** for orphaned or externally started instances and stops them on click. Status label updates every 2 s and on launch.
+
 ## 2.0.0
 
 ### Removed

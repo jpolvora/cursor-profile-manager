@@ -15,10 +15,13 @@
 
 ## ✨ Features
 
-- **🛡️ MITM Proxy Engine**: A local Node.js HTTPS proxy that seamlessly sits between Cursor and its API backend to capture traffic.
+- **🛡️ MITM Proxy Engine**: Captures **all** Cursor API traffic — JSON, Connect/protobuf (`application/connect+proto`), SSE streams, gzip/brotli bodies, and empty requests (no body filter).
+- **📊 Stream analytics**: Parses streaming LLM responses, extracts token usage, estimates **tokens/second**, **time-to-first-token (TTFT)**, and shows live stream progress in the UI via SSE.
+- **🧠 Prompt capture**: Extracts system prompts, injected context, tool definitions, user messages, and assembled assistant output from requests/responses (including streamed deltas).
 - **💾 Local Persistence**: Uses SQLite (`better-sqlite3`) for fast, zero-configuration storage of raw JSON requests and responses.
-- **🎨 Beautiful Dashboard**: A stunning, modern web interface built with React and Vite. It features real-time polling, markdown rendering, and syntax highlighting for intercepted prompts.
-- **🔍 Deep Inspection**: View exact headers, status codes, and payloads sent and received by the AI agents.
+- **🎨 Beautiful Dashboard**: A stunning, modern web interface built with React and Vite. It features **live SSE updates**, markdown rendering, and syntax highlighting for intercepted prompts.
+- **🔍 Deep Inspection**: View exact headers, status codes, payloads, and **request metadata** (project path, Cursor window session, duration) sent and received by the AI agents.
+- **📁 Project & Window Grouping**: Sidebar groups traffic by detected workspace/project and Cursor window instance (`x-session-id`), so you can filter one project or one IDE window at a time.
 
 ## 🏗️ Architecture
 
@@ -82,9 +85,12 @@ cursor --proxy-server="http://127.0.0.1:8080" --ignore-certificate-errors
 
 ## 🗺️ Roadmap
 
+- [x] Live SSE refresh in the dashboard (replaces 5s polling).
+- [x] Group interactions by project/workspace and Cursor window instance.
+- [x] Persist request metadata (session id, client version, duration, sanitized headers).
 - [ ] Reverse-engineer Cursor's exact JSON thread schema.
 - [ ] Parse and group individual messages into continuous conversation threads in the UI.
-- [ ] Add full-text search capabilities across historical prompts.
+- [x] Add full-text search capabilities across historical prompts.
 - [ ] Export captured interactions to Markdown/JSON files.
 - [ ] Generate standard SSL Root CA to avoid needing `--ignore-certificate-errors`.
 

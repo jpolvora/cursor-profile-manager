@@ -6,6 +6,13 @@ const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
 
+function ensureColumn(table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!columns.some(c => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
 // Initialize tables
 db.exec(`
   CREATE TABLE IF NOT EXISTS interactions (
@@ -34,30 +41,84 @@ db.exec(`
   END;
 `);
 
+ensureColumn('interactions', 'project_key', 'TEXT');
+ensureColumn('interactions', 'instance_key', 'TEXT');
+ensureColumn('interactions', 'metadata', 'TEXT');
+
 const insertInteraction = db.prepare(`
   INSERT INTO interactions (
-    method, url, request_headers, request_body, 
-    response_status, response_headers, response_body
+    method, url, request_headers, request_body,
+    response_status, response_headers, response_body,
+    project_key, instance_key, metadata
   ) VALUES (
     @method, @url, @request_headers, @request_body,
-    @response_status, @response_headers, @response_body
+    @response_status, @response_headers, @response_body,
+    @project_key, @instance_key, @metadata
   )
 `);
 
-const getInteractions = db.prepare(`
-  SELECT * FROM interactions ORDER BY id DESC LIMIT 100
-`);
+function buildInteractionFilters({ thread, project, instance, q, method }) {
+  const clauses = [];
+  const params = [];
 
-// FTS5 full-text search. When q is empty, returns all (ordered by id DESC).
-// method param: pass '%' to match all methods.
-const searchInteractions = db.prepare(`
-  SELECT i.* FROM interactions i
-  JOIN interactions_fts fts ON fts.rowid = i.id
-  WHERE interactions_fts MATCH ?
-    AND i.method LIKE ?
-  ORDER BY i.id DESC
-  LIMIT ?
-`);
+  if (thread) {
+    clauses.push(`SUBSTR(url, 1, INSTR(url || '?', '?') - 1) = ?`);
+    params.push(thread);
+  }
+  if (project) {
+    if (project === '__unassigned__') {
+      clauses.push('(project_key IS NULL OR project_key = \'\')');
+    } else {
+      clauses.push('project_key = ?');
+      params.push(project);
+    }
+  }
+  if (instance) {
+    clauses.push('instance_key = ?');
+    params.push(instance);
+  }
+  if (method && method !== 'ALL') {
+    clauses.push('method = ?');
+    params.push(method);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  return { where, params, q: q && q.trim() ? q.trim() : '' };
+}
+
+function queryInteractions(filters, limit = 100) {
+  const { where, params, q } = buildInteractionFilters(filters);
+
+  if (q) {
+    const methodLike = filters.method && filters.method !== 'ALL' ? filters.method : '%';
+    const ftsWhere = where
+      ? `${where} AND interactions_fts MATCH ? AND i.method LIKE ?`
+      : 'WHERE interactions_fts MATCH ? AND i.method LIKE ?';
+    return db.prepare(`
+      SELECT i.* FROM interactions i
+      JOIN interactions_fts fts ON fts.rowid = i.id
+      ${ftsWhere}
+      ORDER BY i.id DESC
+      LIMIT ?
+    `).all(...params, q + '*', methodLike, limit);
+  }
+
+  return db.prepare(`
+    SELECT * FROM interactions
+    ${where}
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(...params, limit);
+}
+
+const getInteractions = {
+  all: (filters = {}) => queryInteractions(filters, 100)
+};
+
+const searchInteractions = {
+  all: (q, methodFilter, limit, extraFilters = {}) =>
+    queryInteractions({ ...extraFilters, q, method: methodFilter === '%' ? 'ALL' : methodFilter }, limit)
+};
 
 const getThreads = db.prepare(`
   SELECT
@@ -77,11 +138,44 @@ const getInteractionsByThread = db.prepare(`
   LIMIT ?
 `);
 
+const getProjects = db.prepare(`
+  SELECT
+    COALESCE(NULLIF(project_key, ''), '__unassigned__') AS project_key,
+    COUNT(*) AS count,
+    MAX(timestamp) AS last_timestamp,
+    MAX(method) AS last_method
+  FROM interactions
+  GROUP BY COALESCE(NULLIF(project_key, ''), '__unassigned__')
+  ORDER BY last_timestamp DESC
+`);
+
+const getInstances = db.prepare(`
+  SELECT
+    instance_key,
+    project_key,
+    COUNT(*) AS count,
+    MAX(timestamp) AS last_timestamp,
+    MAX(method) AS last_method
+  FROM interactions
+  WHERE instance_key IS NOT NULL AND instance_key != ''
+    AND (? IS NULL OR project_key = ?)
+  GROUP BY instance_key, project_key
+  ORDER BY last_timestamp DESC
+`);
+
+const getLatestInteractionId = db.prepare(`
+  SELECT MAX(id) AS max_id FROM interactions
+`);
+
 module.exports = {
   db,
   insertInteraction,
   getInteractions,
   searchInteractions,
   getThreads,
-  getInteractionsByThread
+  getInteractionsByThread,
+  getProjects,
+  getInstances,
+  getLatestInteractionId,
+  queryInteractions
 };

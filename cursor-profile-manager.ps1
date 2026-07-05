@@ -18,8 +18,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 2.0.0
-$script:AppVersionId = '2.0.0'
+# App-Version: 2.0.2
+$script:AppVersionId = '2.0.2'
 $script:AppDisplayName = 'Cursor Profile Manager'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
@@ -27,7 +27,9 @@ $script:AgentStoryProxyProcess = $null
 $script:AgentStoryUiProcess = $null
 $script:btnAgentStory = $null
 $script:lblAgentStoryStatus = $null
+$script:lnkAgentStoryOpen = $null
 $script:sepAgentStory = $null
+$script:AgentStoryUiUrl = 'http://localhost:5173/'
 $script:UiShuttingDown = $false
 $script:InstallRoot = $PSScriptRoot
 $script:UpdateRepoId = 'jpolvora/cursor-profile-manager'
@@ -712,8 +714,14 @@ function Apply-ToolbarTheme {
         Update-ToolbarButtonTheme -Button $script:btnAgentStory
     }
     if ($script:lblAgentStoryStatus) {
-        $script:lblAgentStoryStatus.ForeColor = if ($script:AgentStoryProxyProcess -and -not $script:AgentStoryProxyProcess.HasExited) { $script:UiRunningColor } else { $script:UiTextMuted }
         $script:lblAgentStoryStatus.BackColor = $script:UiPanelColor
+    }
+    if ($script:lnkAgentStoryOpen) {
+        $script:lnkAgentStoryOpen.BackColor = $script:UiPanelColor
+        $script:lnkAgentStoryOpen.LinkColor = $script:UiAccent
+        $script:lnkAgentStoryOpen.ActiveLinkColor = $script:UiAccentHover
+        $script:lnkAgentStoryOpen.VisitedLinkColor = $script:UiAccent
+        Set-AgentStoryOpenLinkDisplay
     }
     if ($script:sepAgentStory) {
         $script:sepAgentStory.BackColor = $script:UiBorderColor
@@ -1188,11 +1196,40 @@ function Test-AgentStoryServicePortListening {
     return ((Get-ListenerProcessIdsForPort -Port $Port).Count -gt 0)
 }
 
-function Test-AgentStoryProxyRunning {
-    if (-not (Test-AgentStoryProcessAlive -Process $script:AgentStoryProxyProcess)) {
-        return $false
+function Resolve-AgentStoryRunState {
+    param(
+        [bool]$ProxyProcessAlive = (Test-AgentStoryProcessAlive -Process $script:AgentStoryProxyProcess),
+        [bool]$UiProcessAlive = (Test-AgentStoryProcessAlive -Process $script:AgentStoryUiProcess),
+        [bool]$ProxyPort8080 = (Test-AgentStoryServicePortListening -Port 8080),
+        [bool]$ApiPort3001 = (Test-AgentStoryServicePortListening -Port 3001),
+        [bool]$UiPort5173 = (Test-AgentStoryServicePortListening -Port 5173)
+    )
+
+    $proxyUp = $ProxyProcessAlive -or ($ProxyPort8080 -and $ApiPort3001)
+    $uiUp = $UiProcessAlive -or $UiPort5173
+    $anyPort = $ProxyPort8080 -or $ApiPort3001 -or $UiPort5173
+
+    if ($proxyUp -and $uiUp) {
+        return 'Running'
     }
-    return (Test-AgentStoryServicePortListening -Port 8080)
+    if ($ProxyProcessAlive -or $UiProcessAlive -or $anyPort) {
+        return 'Partial'
+    }
+    return 'Stopped'
+}
+
+function Test-AgentStoryAnyRunning {
+    return (Resolve-AgentStoryRunState) -ne 'Stopped'
+}
+
+function Test-AgentStoryProxyRunning {
+    if (Test-AgentStoryServicePortListening -Port 8080) {
+        return $true
+    }
+    if (Test-AgentStoryProcessAlive -Process $script:AgentStoryProxyProcess) {
+        return (Test-AgentStoryServicePortListening -Port 8080)
+    }
+    return $false
 }
 
 function Get-CursorProxyLaunchArgs {
@@ -1309,9 +1346,14 @@ function Ensure-NodeDependencies {
 }
 
 function Start-AgentStoryProxy {
-    if (Test-AgentStoryProxyRunning) {
+    $runState = Resolve-AgentStoryRunState
+    if ($runState -eq 'Running') {
         Update-AgentStoryUiState
         return $true
+    }
+    if ($runState -eq 'Partial') {
+        Stop-AgentStory
+        Start-Sleep -Milliseconds 500
     }
 
     foreach ($port in @(8080, 3001, 5173)) {
@@ -1453,33 +1495,89 @@ function Stop-AgentStory {
     Update-AgentStoryUiState
 }
 
+function Get-AgentStoryUiUrl {
+    if ($env:AGENT_STORY_UI_URL -and -not [string]::IsNullOrWhiteSpace($env:AGENT_STORY_UI_URL)) {
+        return $env:AGENT_STORY_UI_URL.Trim()
+    }
+    return $script:AgentStoryUiUrl
+}
+
+function Test-AgentStoryUiAvailable {
+    return (Test-AgentStoryServicePortListening -Port 5173)
+}
+
+function Open-AgentStoryDashboard {
+    if (-not (Test-AgentStoryUiAvailable)) {
+        [System.Windows.Forms.MessageBox]::Show(
+            'Agent Story dashboard is not running. Start Agent Story from the toolbar first.',
+            'Agent Story',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+        return $false
+    }
+
+    try {
+        Start-Process -FilePath (Get-AgentStoryUiUrl)
+        return $true
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Could not open Agent Story dashboard:`n$($_.Exception.Message)",
+            'Agent Story',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+        return $false
+    }
+}
+
+function Set-AgentStoryOpenLinkDisplay {
+    if (-not $script:lnkAgentStoryOpen) { return }
+
+    $uiAvailable = Test-AgentStoryUiAvailable
+    $url = Get-AgentStoryUiUrl
+    $script:lnkAgentStoryOpen.Text = "Open dashboard"
+    $script:lnkAgentStoryOpen.Visible = $uiAvailable
+    $script:lnkAgentStoryOpen.Enabled = $uiAvailable
+    if ($uiAvailable) {
+        $script:lnkAgentStoryOpen.LinkColor = $script:UiAccent
+    }
+    else {
+        $script:lnkAgentStoryOpen.LinkColor = $script:UiTextMuted
+    }
+}
+
 function Update-AgentStoryUiState {
     if ($script:UiShuttingDown) { return }
     if (-not $script:btnAgentStory -or -not $script:lblAgentStoryStatus) { return }
     if ($form -and $form.IsDisposed) { return }
 
-    $proxyRunning = Test-AgentStoryProxyRunning
-    $uiRunning = Test-AgentStoryProcessAlive -Process $script:AgentStoryUiProcess
+    $runState = Resolve-AgentStoryRunState
 
-    if ($proxyRunning -and $uiRunning) {
-        $script:btnAgentStory.Text = 'Stop Agent Story'
-        $script:lblAgentStoryStatus.Text = "$([char]0x25CF) Agent Story: Running (localhost:5173)"
-        $script:lblAgentStoryStatus.ForeColor = $script:UiRunningColor
-    }
-    elseif ($proxyRunning -or $uiRunning) {
-        $script:btnAgentStory.Text = 'Stop Agent Story'
-        $script:lblAgentStoryStatus.Text = "$([char]0x25CF) Agent Story: Partial"
-        $script:lblAgentStoryStatus.ForeColor = [System.Drawing.Color]::FromArgb(180, 120, 0)
-    }
-    else {
-        if ($script:AgentStoryProxyProcess -or $script:AgentStoryUiProcess) {
-            $script:AgentStoryProxyProcess = $null
-            $script:AgentStoryUiProcess = $null
+    switch ($runState) {
+        'Running' {
+            $script:btnAgentStory.Text = 'Stop Agent Story'
+            $script:lblAgentStoryStatus.Text = "$([char]0x25CF) Agent Story: Running"
+            $script:lblAgentStoryStatus.ForeColor = $script:UiRunningColor
         }
-        $script:btnAgentStory.Text = 'Start Agent Story'
-        $script:lblAgentStoryStatus.Text = "$([char]0x25CB) Agent Story: Stopped"
-        $script:lblAgentStoryStatus.ForeColor = $script:UiTextMuted
+        'Partial' {
+            $script:btnAgentStory.Text = 'Stop Agent Story'
+            $script:lblAgentStoryStatus.Text = "$([char]0x25CF) Agent Story: Partial"
+            $script:lblAgentStoryStatus.ForeColor = [System.Drawing.Color]::FromArgb(180, 120, 0)
+        }
+        default {
+            if ($script:AgentStoryProxyProcess -or $script:AgentStoryUiProcess) {
+                $script:AgentStoryProxyProcess = $null
+                $script:AgentStoryUiProcess = $null
+            }
+            $script:btnAgentStory.Text = 'Start Agent Story'
+            $script:lblAgentStoryStatus.Text = "$([char]0x25CB) Agent Story: Stopped"
+            $script:lblAgentStoryStatus.ForeColor = $script:UiTextMuted
+        }
     }
+
+    Set-AgentStoryOpenLinkDisplay
 }
 
 # ---------------------------------------------------------------------------
@@ -2987,7 +3085,29 @@ $script:lblAgentStoryStatus.AutoSize = $true
 $script:lblAgentStoryStatus.Margin = New-Object System.Windows.Forms.Padding 0, 6, 8, 0
 $script:lblAgentStoryStatus.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
 
-$script:ProfileFlow.Controls.AddRange(@($btnAdd, $btnRefresh, $script:sepAgentStory, $script:btnAgentStory, $script:lblAgentStoryStatus))
+$script:lnkAgentStoryOpen = New-Object System.Windows.Forms.LinkLabel
+$script:lnkAgentStoryOpen.Text = 'Open dashboard'
+$script:lnkAgentStoryOpen.AutoSize = $true
+$script:lnkAgentStoryOpen.Visible = $false
+$script:lnkAgentStoryOpen.Enabled = $false
+$script:lnkAgentStoryOpen.BackColor = $script:UiPanelColor
+$script:lnkAgentStoryOpen.LinkColor = $script:UiAccent
+$script:lnkAgentStoryOpen.ActiveLinkColor = $script:UiAccentHover
+$script:lnkAgentStoryOpen.VisitedLinkColor = $script:UiAccent
+$script:lnkAgentStoryOpen.Margin = New-Object System.Windows.Forms.Padding 0, 6, 8, 0
+$script:lnkAgentStoryOpen.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+$script:lnkAgentStoryOpen.Add_LinkClicked({
+    [void](Open-AgentStoryDashboard)
+})
+
+$script:ProfileFlow.Controls.AddRange(@(
+    $btnAdd,
+    $btnRefresh,
+    $script:sepAgentStory,
+    $script:btnAgentStory,
+    $script:lblAgentStoryStatus,
+    $script:lnkAgentStoryOpen
+))
 
 $script:ThemeLabel = New-Object System.Windows.Forms.Label
 $script:ThemeLabel.Text = 'Theme:'
@@ -3038,9 +3158,7 @@ $btnRefresh.Add_Click({
 })
 
 $script:btnAgentStory.Add_Click({
-    $anyRunning = (Test-AgentStoryProcessAlive -Process $script:AgentStoryProxyProcess) -or
-        (Test-AgentStoryProcessAlive -Process $script:AgentStoryUiProcess)
-    if ($anyRunning) {
+    if (Test-AgentStoryAnyRunning) {
         Stop-AgentStory
     }
     else {
@@ -3105,6 +3223,7 @@ $form.Add_FormClosing({
 Update-CursorInstallUi
 
 Update-ProfileGrid
+Update-AgentStoryUiState
 
     [void]$form.ShowDialog()
 }

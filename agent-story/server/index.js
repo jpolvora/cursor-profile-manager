@@ -1,8 +1,19 @@
 const { Proxy } = require('http-mitm-proxy');
 const express = require('express');
 const cors = require('cors');
-const zlib = require('zlib');
-const { insertInteraction, getInteractions, searchInteractions, getThreads, getInteractionsByThread } = require('./db');
+const {
+  insertInteraction,
+  getInteractions,
+  searchInteractions,
+  getThreads,
+  getInteractionsByThread,
+  getProjects,
+  getInstances,
+  getLatestInteractionId
+} = require('./db');
+const { extractInteractionContext } = require('./metadata');
+const { shouldCaptureHost, buildCaptureRecord, isStreamingContentType } = require('./capture');
+const sse = require('./sse');
 
 const proxy = new Proxy();
 const app = express();
@@ -11,55 +22,122 @@ const API_PORT = 3001;
 app.use(cors());
 app.use(express.json());
 
-// API Endpoint to fetch interactions for the UI
+function parseInteractionFilters(query) {
+  return {
+    thread: query.thread || null,
+    project: query.project || null,
+    instance: query.instance || null,
+    q: query.q || '',
+    method: query.method || 'ALL'
+  };
+}
+
+function fetchInteractions(filters, limit = 100) {
+  const { thread, project, instance, q, method } = filters;
+  if (thread && !q.trim()) {
+    return getInteractionsByThread.all(thread, limit);
+  }
+  if (q.trim()) {
+    const methodFilter = method && method !== 'ALL' ? method : '%';
+    return searchInteractions.all(q.trim(), methodFilter, limit, { thread, project, instance });
+  }
+  return getInteractions.all({ thread, project, instance, method });
+}
+
+function notifyClients(event, data) {
+  sse.broadcast(event, data);
+}
+
+// SSE stream for live UI updates
+app.get('/api/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const latest = getLatestInteractionId.get();
+  res.write(`event: connected\ndata: ${JSON.stringify({ max_id: latest.max_id || 0 })}\n\n`);
+
+  sse.addClient(res);
+
+  const heartbeat = setInterval(() => {
+    res.write(': heartbeat\n\n');
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+  });
+});
+
 app.get('/api/interactions', (req, res) => {
-  const { thread, q, method } = req.query;
+  const filters = parseInteractionFilters(req.query);
   try {
-    let rows;
-    if (thread) {
-      rows = getInteractionsByThread.all(thread, 100);
-    } else if (q && q.trim()) {
-      const methodFilter = method && method !== 'ALL' ? method : '%';
-      rows = searchInteractions.all(q.trim() + '*', methodFilter, 100);
-    } else {
-      rows = getInteractions.all();
-    }
-    res.json(rows);
+    res.json(fetchInteractions(filters));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const isSearchError = filters.q && filters.q.trim();
+    res.status(isSearchError ? 400 : 500).json({ error: err.message });
   }
 });
 
 app.get('/api/threads', (req, res) => {
   try {
-    const rows = getThreads.all();
-    res.json(rows);
+    res.json(getThreads.all());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/projects', (req, res) => {
+  try {
+    const projects = getProjects.all();
+    const instances = getInstances.all(null, null);
+    const instancesByProject = instances.reduce((acc, row) => {
+      const key = row.project_key || '__none__';
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(row);
+      return acc;
+    }, {});
+
+    res.json(projects.map(project => {
+      const instanceBucket = project.project_key === '__unassigned__' ? '__none__' : project.project_key;
+      const sessions = (instancesByProject[instanceBucket] || [])
+        .slice()
+        .sort((a, b) => String(b.last_timestamp).localeCompare(String(a.last_timestamp)));
+
+      return {
+        ...project,
+        label: project.project_key === '__unassigned__'
+          ? 'Unassigned'
+          : (project.project_key.split('/').filter(Boolean).pop() || project.project_key),
+        sessions
+      };
+    }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/instances', (req, res) => {
+  const project = req.query.project || null;
+  try {
+    res.json(getInstances.all(project, project));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 app.get('/api/interactions/search', (req, res) => {
-  const { q = '', method = '', limit = 100 } = req.query;
-  const methodFilter = method && method !== 'ALL' ? method : '%';
-  const parsedLimit = Math.min(parseInt(limit, 10) || 100, 500);
+  const filters = parseInteractionFilters(req.query);
+  const parsedLimit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
   try {
-    let rows;
-    if (q.trim()) {
-      rows = searchInteractions.all(q.trim() + '*', methodFilter, parsedLimit);
-    } else {
-      rows = getInteractions.all();
-    }
-    res.json(rows);
+    res.json(fetchInteractions(filters, parsedLimit));
   } catch (err) {
-    // FTS5 syntax errors return 400
     res.status(400).json({ error: err.message });
   }
 });
 
 const PROXY_PORT = 8080;
 
-// Configure the MITM proxy
 proxy.onError(function(ctx, err) {
   console.error('Proxy Error:', err);
   if (err && err.code === 'EADDRINUSE') {
@@ -69,69 +147,102 @@ proxy.onError(function(ctx, err) {
 
 proxy.onRequest(function(ctx, callback) {
   const host = ctx.clientToProxyRequest.headers.host || '';
-  
-  // For MVP, we intercept traffic to cursor domains (or api.cursor.sh)
-  // To avoid noise, we only log if it's cursor related
-  if (host.includes('cursor')) {
-    const reqChunks = [];
-    ctx.onRequestData(function(ctx, chunk, callback) {
-      reqChunks.push(chunk);
-      return callback(null, chunk);
-    });
+  ctx.requestStartTime = Date.now();
+  ctx.captureKey = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    ctx.onRequestEnd(function(ctx, callback) {
-      ctx.reqBody = Buffer.concat(reqChunks);
-      return callback();
-    });
-
-    const resChunks = [];
-    ctx.onResponseData(function(ctx, chunk, callback) {
-      resChunks.push(chunk);
-      return callback(null, chunk);
-    });
-
-    ctx.onResponseEnd(function(ctx, callback) {
-      let resBody = Buffer.concat(resChunks);
-      
-      // Handle decompression
-      const contentEncoding = ctx.serverToProxyResponse.headers['content-encoding'];
-      try {
-        if (contentEncoding === 'gzip') {
-          resBody = zlib.gunzipSync(resBody);
-        } else if (contentEncoding === 'deflate') {
-          resBody = zlib.inflateSync(resBody);
-        } else if (contentEncoding === 'br') {
-          resBody = zlib.brotliDecompressSync(resBody);
-        }
-      } catch (err) {
-        console.error('Decompression error:', err);
-      }
-
-      try {
-        let reqBodyStr = ctx.reqBody ? ctx.reqBody.toString('utf8') : '';
-        let resBodyStr = resBody ? resBody.toString('utf8') : '';
-
-        // Only log if it's an API request with some payload to avoid noise
-        if (reqBodyStr || resBodyStr) {
-          const urlStr = (ctx.isSSL ? 'https://' : 'http://') + host + (ctx.clientToProxyRequest.url || '');
-          insertInteraction.run({
-            method: ctx.clientToProxyRequest.method,
-            url: urlStr,
-            request_headers: JSON.stringify(ctx.clientToProxyRequest.headers),
-            request_body: reqBodyStr,
-            response_status: ctx.serverToProxyResponse.statusCode,
-            response_headers: JSON.stringify(ctx.serverToProxyResponse.headers),
-            response_body: resBodyStr
-          });
-          console.log(`[Proxy] Logged interaction: ${ctx.clientToProxyRequest.method} ${urlStr}`);
-        }
-      } catch (err) {
-        console.error('DB Insert Error:', err);
-      }
-
-      return callback();
-    });
+  if (!shouldCaptureHost(host)) {
+    return callback();
   }
+
+  const reqChunks = [];
+  ctx.onRequestData(function(ctx, chunk, callback) {
+    reqChunks.push(chunk);
+    return callback(null, chunk);
+  });
+
+  ctx.onRequestEnd(function(ctx, callback) {
+    ctx.reqBody = Buffer.concat(reqChunks);
+    return callback();
+  });
+
+  const resChunks = [];
+  ctx.onResponseData(function(ctx, chunk, callback) {
+    resChunks.push(chunk);
+
+    if (!ctx.firstChunkTime) {
+      ctx.firstChunkTime = Date.now();
+    }
+    ctx.totalResponseBytes = (ctx.totalResponseBytes || 0) + chunk.length;
+
+    const resContentType = ctx.serverToProxyResponse?.headers?.['content-type'];
+    if (isStreamingContentType(resContentType)) {
+      notifyClients('stream-progress', {
+        capture_key: ctx.captureKey,
+        url: (ctx.isSSL ? 'https://' : 'http://') + host + (ctx.clientToProxyRequest.url || ''),
+        method: ctx.clientToProxyRequest.method,
+        bytes: ctx.totalResponseBytes,
+        elapsed_ms: Date.now() - ctx.requestStartTime,
+        time_to_first_token_ms: ctx.firstChunkTime - ctx.requestStartTime
+      });
+    }
+
+    return callback(null, chunk);
+  });
+
+  ctx.onResponseEnd(function(ctx, callback) {
+    ctx.resBody = Buffer.concat(resChunks);
+
+    try {
+      const record = buildCaptureRecord(ctx);
+      const durationMs = Date.now() - (ctx.requestStartTime || Date.now());
+      const context = extractInteractionContext(
+        ctx.clientToProxyRequest.headers,
+        record.request_body,
+        {
+          duration_ms: durationMs,
+          response_status: record.response_status,
+          host,
+          capture: record.capture
+        }
+      );
+
+      const result = insertInteraction.run({
+        method: record.method,
+        url: record.url,
+        request_headers: record.request_headers,
+        request_body: record.request_body,
+        response_status: record.response_status,
+        response_headers: record.response_headers,
+        response_body: record.response_body,
+        project_key: context.project_key,
+        instance_key: context.instance_key,
+        metadata: context.metadata
+      });
+
+      const interactionPayload = {
+        id: Number(result.lastInsertRowid),
+        project_key: context.project_key,
+        instance_key: context.instance_key,
+        capture_key: ctx.captureKey,
+        streaming: record.capture.response.streaming,
+        tokens_per_second: record.capture.response.tokens_per_second
+      };
+
+      notifyClients('interaction', interactionPayload);
+
+      const resSummary = record.capture.response;
+      console.log(
+        `[Proxy] #${result.lastInsertRowid} ${record.method} ${record.url}` +
+        (resSummary.streaming ? ' [stream]' : '') +
+        (resSummary.tokens_per_second ? ` ${resSummary.tokens_per_second} tok/s` : '') +
+        ` ${durationMs}ms`
+      );
+    } catch (err) {
+      console.error('Capture Error:', err);
+    }
+
+    return callback();
+  });
 
   return callback();
 });

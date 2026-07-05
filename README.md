@@ -64,7 +64,7 @@ Re-run after moving this folder to repair the shortcut.
 | **Status column** | `● Running` / `○ Idle` from live `Cursor.exe` process inspection |
 | **Instances column** | Count of running windows per profile (0, 1, 2, …) |
 | **Grid columns** | Name, User Data Dir, Instances, Status, Proxy, Notes, Actions (default project folder is edited in Add/Edit only) |
-| **Agent Story** | Start/stop the Agent Story proxy and dashboard directly from the toolbar. Run proxied profiles automatically route traffic to the proxy |
+| **Agent Story** | **Start / Stop Agent Story** toggle on the toolbar; **Open dashboard** link (default browser → `http://localhost:5173/`) when the UI is running. Proxied profiles route traffic through the proxy |
 | **Live updates** | WMI process create/exit events + 2 s fallback poll; grid updates only when data changes |
 | **Multiple manager windows** | Each launch opens a new manager instance (no singleton lock) |
 | **Persistence** | Profiles saved to `profiles.json` in the profiles directory |
@@ -82,7 +82,7 @@ Re-run after moving this folder to repair the shortcut.
 5. Click **Start ▶** again on the same row to open another window for that profile.
 6. Use other Actions: **Focus** / **Close** (when running), **Folder**, **Edit**, or **Del**.
 7. On first launch, sign in with the account for that profile; settings and extensions persist there.
-8. To inspect Cursor AI traffic, check the **Run proxied** option in the profile's Add/Edit dialog. Start the proxy server by clicking **Start Agent Story** on the toolbar, and start your profile. The manager will prompt you to start the proxy if it isn't running when you start a proxied profile.
+8. To inspect Cursor AI traffic, check the **Run proxied** option in the profile's Add/Edit dialog. Toggle **Start Agent Story** / **Stop Agent Story** on the toolbar, then click **Open dashboard** when the UI is running (or browse to `http://localhost:5173/`). Start your proxied profile — you'll be prompted to start the proxy if port 8080 isn't listening.
 
 ## Technical details
 
@@ -116,6 +116,7 @@ The UI grid is driven by an in-memory model; the grid is touched only when that 
 | `CURSOR_PROFILES_DIR` | Root for profile folders and `profiles.json` |
 | `CURSOR_BIN` | Path to `Cursor.exe` (auto-detected if unset) |
 | `AGENT_STORY_DIR` | Path to the `agent-story` folder (default: `agent-story\` under the manager install folder) |
+| `AGENT_STORY_UI_URL` | Agent Story dashboard URL for **Open dashboard** (default: `http://localhost:5173/`) |
 
 Cursor IDE is auto-detected under `%LOCALAPPDATA%\Programs\cursor\` (or `Cursor\`), then `cursor` on PATH. The footer shows the detected version; the **cursor** CLI is checked on PATH or beside the IDE install. Use **Install Cursor** in the footer if neither is found.
 
