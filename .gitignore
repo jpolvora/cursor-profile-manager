@@ -1,0 +1,4 @@
+# Agent Story local SQLite database (runtime data)
+agent-story/server/agent-story.db
+agent-story/server/agent-story.db-wal
+agent-story/server/agent-story.db-shm
