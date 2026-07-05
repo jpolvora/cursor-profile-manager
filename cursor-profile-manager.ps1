@@ -19,8 +19,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 2.0.10
-$script:AppVersionId = '2.0.10'
+# App-Version: 2.0.11
+$script:AppVersionId = '2.0.11'
 $script:AppDisplayName = 'Cursor Profile Manager'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
@@ -753,23 +753,97 @@ function Confirm-AppExitIfNeeded {
     return ($result -eq [System.Windows.Forms.DialogResult]::Yes)
 }
 
-function Hide-MainWindowToTray {
-    if (-not $form) { return }
+function Get-AppTrayIcon {
+    $candidates = @(
+        (Find-CursorExecutable)
+        (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe')
+    )
+
+    foreach ($path in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path)) {
+            continue
+        }
+        try {
+            $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($path)
+            if ($icon) {
+                return $icon
+            }
+        }
+        catch {
+            continue
+        }
+    }
+
+    return [System.Drawing.SystemIcons]::Application
+}
+
+function Initialize-AppTrayIcon {
+    if ($script:TrayNotifyIcon) { return }
+
+    $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
+    $notifyIcon.Icon = Get-AppTrayIcon
+    $notifyIcon.Text = (Get-AppWindowTitle)
+    if ($notifyIcon.Text.Length -gt 63) {
+        $notifyIcon.Text = $notifyIcon.Text.Substring(0, 63)
+    }
+    $notifyIcon.Visible = $false
+
+    $menu = New-Object System.Windows.Forms.ContextMenuStrip
+    $showItem = New-Object System.Windows.Forms.ToolStripMenuItem
+    $showItem.Text = 'Show Window'
+    $showItem.Add_Click({ Show-MainWindowFromTray })
+    $exitItem = New-Object System.Windows.Forms.ToolStripMenuItem
+    $exitItem.Text = 'Exit'
+    $exitItem.Add_Click({
+        if (-not (Confirm-AppExitIfNeeded)) { return }
+        $script:UiExitConfirmed = $true
+        if ($form) {
+            $form.ShowInTaskbar = $true
+            $form.Close()
+        }
+    })
+    [void]$menu.Items.Add($showItem)
+    [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+    [void]$menu.Items.Add($exitItem)
+    $notifyIcon.ContextMenuStrip = $menu
+    $notifyIcon.Add_DoubleClick({ Show-MainWindowFromTray })
+
+    $script:TrayNotifyIcon = $notifyIcon
+}
+
+function Set-AppTrayIconVisible {
+    param([bool]$Visible)
 
     Initialize-AppTrayIcon
+    if (-not $script:TrayNotifyIcon) { return }
+
+    if ($Visible) {
+        if (-not $script:TrayNotifyIcon.Icon) {
+            $script:TrayNotifyIcon.Icon = Get-AppTrayIcon
+        }
+        $title = Get-AppWindowTitle
+        if ($title.Length -gt 63) {
+            $title = $title.Substring(0, 63)
+        }
+        $script:TrayNotifyIcon.Text = $title
+        $script:TrayNotifyIcon.Visible = $false
+        $script:TrayNotifyIcon.Visible = $true
+    }
+    else {
+        $script:TrayNotifyIcon.Visible = $false
+    }
+}
+
+function Hide-MainWindowToTray {
+    if (-not $form) { return }
+    if (-not $script:MinimizeToTray) { return }
+
     $script:TrayMinimizeSync = $true
     try {
-        $form.Hide()
+        $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
         $form.ShowInTaskbar = $false
-        if ($script:TrayNotifyIcon) {
-            $script:TrayNotifyIcon.Visible = $true
-            $script:TrayNotifyIcon.ShowBalloonTip(
-                3000,
-                (Get-AppDisplayName),
-                'Running in the notification area.',
-                [System.Windows.Forms.ToolTipIcon]::Info
-            ) | Out-Null
-        }
+        $form.Hide()
+        Set-AppTrayIconVisible -Visible $true
     }
     finally {
         $script:TrayMinimizeSync = $false
@@ -779,47 +853,12 @@ function Hide-MainWindowToTray {
 function Show-MainWindowFromTray {
     if (-not $form) { return }
 
+    Set-AppTrayIconVisible -Visible $false
     $form.ShowInTaskbar = $true
     $form.Show()
     $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
     $form.Activate()
-    if ($script:TrayNotifyIcon) {
-        $script:TrayNotifyIcon.Visible = $false
-    }
-}
-
-function Initialize-AppTrayIcon {
-    if ($script:TrayNotifyIcon) { return }
-
-    $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
-    $cursorPath = Find-CursorExecutable
-    if ($cursorPath) {
-        $notifyIcon.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($cursorPath)
-    }
-    elseif ($form -and $form.Icon) {
-        $notifyIcon.Icon = $form.Icon
-    }
-    $notifyIcon.Text = Get-AppWindowTitle
-    $notifyIcon.Visible = $false
-
-    $menu = New-Object System.Windows.Forms.ContextMenuStrip
-    $showItem = New-Object System.Windows.Forms.ToolStripMenuItem
-    $showItem.Text = 'Show'
-    $showItem.Add_Click({ Show-MainWindowFromTray })
-    $exitItem = New-Object System.Windows.Forms.ToolStripMenuItem
-    $exitItem.Text = 'Exit'
-    $exitItem.Add_Click({
-        if (-not (Confirm-AppExitIfNeeded)) { return }
-        $script:UiExitConfirmed = $true
-        if ($form) { $form.Close() }
-    })
-    [void]$menu.Items.Add($showItem)
-    [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
-    [void]$menu.Items.Add($exitItem)
-    $notifyIcon.ContextMenuStrip = $menu
-    $notifyIcon.Add_DoubleClick({ Show-MainWindowFromTray })
-
-    $script:TrayNotifyIcon = $notifyIcon
+    $form.BringToFront() | Out-Null
 }
 
 function Sync-AppOptionsCheckboxes {
@@ -847,6 +886,10 @@ function Set-AppMinimizeToTrayPreference {
 
     $script:MinimizeToTray = $Enabled
     Sync-AppOptionsCheckboxes
+
+    if ($Enabled) {
+        Initialize-AppTrayIcon
+    }
 
     if ($script:AutoStartWithWindows) {
         Set-AppAutoStartEnabled -Enabled $true
@@ -3760,7 +3803,7 @@ $script:ThemeCombo.Add_SelectedIndexChanged({
 $script:ThemeFlow.Controls.AddRange(@($script:ThemeLabel, $script:ThemeCombo))
 
 $script:ChkMinimizeToTray = New-Object System.Windows.Forms.CheckBox
-$script:ChkMinimizeToTray.Text = 'Minimize to tray'
+$script:ChkMinimizeToTray.Text = 'Close/minimize to tray'
 $script:ChkMinimizeToTray.AutoSize = $true
 $script:ChkMinimizeToTray.Margin = New-Object System.Windows.Forms.Padding 12, 6, 0, 0
 $script:ChkMinimizeToTray.ForeColor = $script:UiTextPrimary
@@ -3892,8 +3935,8 @@ $form.Add_FormClosing({
     $refreshTimer.Stop()
     $processEventDebounce.Stop()
     Stop-CursorProcessWatchers
+    Set-AppTrayIconVisible -Visible $false
     if ($script:TrayNotifyIcon) {
-        $script:TrayNotifyIcon.Visible = $false
         $script:TrayNotifyIcon.Dispose()
         $script:TrayNotifyIcon = $null
     }
@@ -3906,15 +3949,17 @@ Update-CursorInstallUi
 Update-ProfileGrid
 Update-AgentStoryUiState
 
-if ($StartMinimized -and $script:MinimizeToTray) {
-    $form.Add_Shown({
-        if ($script:MinimizeToTray) {
-            Hide-MainWindowToTray
-        }
-    })
+if ($script:MinimizeToTray) {
+    Initialize-AppTrayIcon
 }
 
-[void]$form.ShowDialog()
+$form.Add_Shown({
+    if ($StartMinimized -and $script:MinimizeToTray) {
+        Hide-MainWindowToTray
+    }
+})
+
+[void][System.Windows.Forms.Application]::Run($form)
 }
 catch {
     Show-StartupFailure -Message "Cursor Profile Manager failed to start:`n`n$($_.Exception.Message)"

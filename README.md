@@ -71,7 +71,7 @@ Re-run the shortcut installer if you move the folder to automatically repair the
 | **Live Process Tracking** | Monitors running instances using Windows WMI process start/exit events and a 2-second fallback timer. Shows live window count and active status in the grid. |
 | **Parallel Execution** | Start multiple instances/windows for the same profile or run multiple different profiles concurrently on the same project folders. |
 | **Theme Customization** | Light mode, Dark mode, or **System default** (dynamically tracks Windows color customization settings via registry changes). |
-| **Tray and startup options** | Optional **Minimize to tray** (notification area) and **Start with Windows** (current-user Run key). When the Agent Story proxy is running, closing the manager asks for confirmation before stopping it. |
+| **Tray and startup options** | Optional **Close/minimize to tray** sends the window to the notification area when you click minimize or close (X); tray menu **Show Window** / **Exit** (Exit confirms if Agent Story proxy is running). **Start with Windows** registers in the current-user Run key. |
 | **In-App Auto-Updates** | One-click footer button comparing local code version markers against GitHub `master`. Updates all local script assets in-place on confirmation. |
 | **Cursor Installer Helper** | Checks for Cursor installation path and CLI executable on `PATH`. Prompts to download and install if missing. |
 | **Safe Deletion** | Prevents folder deletion if any window for the profile is still active. |
@@ -90,7 +90,7 @@ Re-run the shortcut installer if you move the folder to automatically repair the
    * Click **Open dashboard** to launch the React web app (`http://localhost:5173/`).
    * Start your proxied profile. *Note: Ensure all existing Cursor windows for that profile are closed before launching proxied, as environment variables and settings apply at startup.*
    * Work with Cursor's chat or Cmd+K as usual and watch raw prompts and stream details appear instantly on the dashboard.
-8. **Tray and startup (toolbar):** Enable **Minimize to tray** to keep the manager in the notification area when you minimize or close the window. Enable **Start with Windows** to launch the manager at sign-in (starts hidden in the tray when minimize-to-tray is also enabled). If the Agent Story proxy is running, choosing **Exit** from the tray or closing the window for real prompts for confirmation before stopping the proxy.
+8. **Tray and startup (toolbar):** Enable **Close/minimize to tray** to hide the manager in the notification area when you minimize or click the window close (X) button. Right-click the tray icon for **Show Window** (restore) or **Exit** (fully quit; confirms if the Agent Story proxy is running). Enable **Start with Windows** to launch at sign-in (starts in the tray when close/minimize-to-tray is also enabled). On Windows 11, new tray icons may appear under the **^** overflow chevron first.
 
 ## Technical details
 

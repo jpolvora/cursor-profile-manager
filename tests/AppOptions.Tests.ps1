@@ -22,4 +22,11 @@ Describe 'App options helpers' {
             $args | Should Not Match '-StartMinimized'
         }
     }
+
+    Context 'Get-AppTrayIcon' {
+        It 'returns a usable tray icon' {
+            $icon = Get-AppTrayIcon
+            $icon | Should Not BeNullOrEmpty
+        }
+    }
 }

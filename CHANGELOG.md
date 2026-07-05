@@ -4,6 +4,17 @@ All notable user-facing changes to Cursor Profile Manager.
 
 Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (when applicable). Newest dates first.
 
+## 2.0.11
+
+### Fixed
+
+- **System tray icon** — tray icon now always gets a valid icon (Cursor, PowerShell, or system fallback), toggles visibility reliably, and the app uses `Application.Run` so the notification icon stays alive while the window is hidden.
+- **Close/minimize to tray** — both the close (X) and minimize buttons hide to the tray when the option is enabled; tray menu uses **Show Window** and **Exit** (Exit keeps proxy confirmation).
+
+### Changed
+
+- Toolbar checkbox label is **Close/minimize to tray**; release marker bumped to **2.0.11**.
+
 ## 2.0.10
 
 ### Added
