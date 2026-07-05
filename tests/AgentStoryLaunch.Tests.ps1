@@ -204,6 +204,15 @@ Describe 'Cursor proxy launch helpers' {
             $envVars.NODE_TLS_REJECT_UNAUTHORIZED | Should Be '0'
             $envVars.NO_PROXY | Should Be 'localhost,127.0.0.1,.github.com,github.com,.gitlab.com,gitlab.com,.bitbucket.org,bitbucket.org'
         }
+
+        It 'returns GLOBAL_AGENT env vars for alternative without TLS bypass' {
+            $envVars = Get-CursorProxyEnvironmentVariables -UseProxy:$true -ProxyType 'alternative'
+            $envVars.HTTP_PROXY | Should Be 'http://127.0.0.1:8081'
+            $envVars.GLOBAL_AGENT_HTTP_PROXY | Should Be 'http://127.0.0.1:8081'
+            $envVars.GLOBAL_AGENT_HTTPS_PROXY | Should Be 'http://127.0.0.1:8081'
+            $envVars.ContainsKey('NODE_TLS_REJECT_UNAUTHORIZED') | Should Be $false
+            $envVars.NO_PROXY | Should Be 'localhost,127.0.0.1'
+        }
     }
 
     Context 'Update-CursorProfileArgvProxy' {
@@ -254,6 +263,22 @@ Describe 'Cursor proxy launch helpers' {
                 Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
             }
         }
+
+        It 'writes alternative proxy port to argv.json on each sync' {
+            $tempDir = Join-Path $env:TEMP ("cpm-argv-" + [guid]::NewGuid().ToString())
+            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+            try {
+                Update-CursorProfileArgvProxy -UserDataDir $tempDir -EnableProxy:$true -ProxyType 'default'
+                Update-CursorProfileArgvProxy -UserDataDir $tempDir -EnableProxy:$true -ProxyType 'alternative'
+                $argv = Read-JsonObjectHashtableFromFileAllowBools -Path (Get-CursorProfileArgvPath -UserDataDir $tempDir)
+                $argv['proxy-server'] | Should Be 'http://127.0.0.1:8081'
+                $argv['proxy-bypass-list'] | Should Be 'localhost;127.0.0.1'
+                $argv.ContainsKey('ignore-certificate-errors') | Should Be $false
+            }
+            finally {
+                Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 
     Context 'Update-CursorProfileProxySettings' {
@@ -267,7 +292,23 @@ Describe 'Cursor proxy launch helpers' {
                 $settings = Read-JsonObjectHashtableFromFile -Path $settingsPath
                 $settings['http.proxy'] | Should Be 'http://127.0.0.1:8080'
                 $settings['http.proxyStrictSSL'] | Should Be $false
-                $settings['http.proxySupport'] | Should Be 'on'
+                $settings['http.proxySupport'] | Should Be 'override'
+                $settings['http.electronFetch'] | Should Be $true
+            }
+            finally {
+                Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        It 'writes alternative proxy URL and override settings when enabled' {
+            $tempDir = Join-Path $env:TEMP ("cpm-proxy-settings-" + [guid]::NewGuid().ToString())
+            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+            try {
+                Update-CursorProfileProxySettings -UserDataDir $tempDir -EnableProxy:$true -ProxyType 'alternative'
+                $settings = Read-JsonObjectHashtableFromFile -Path (Get-CursorProfileUserSettingsPath -UserDataDir $tempDir)
+                $settings['http.proxy'] | Should Be 'http://127.0.0.1:8081'
+                $settings['http.proxySupport'] | Should Be 'override'
+                $settings['http.electronFetch'] | Should Be $true
             }
             finally {
                 Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -284,6 +325,7 @@ Describe 'Cursor proxy launch helpers' {
                 $settings.ContainsKey('http.proxy') | Should Be $false
                 $settings.ContainsKey('http.proxyStrictSSL') | Should Be $false
                 $settings.ContainsKey('http.proxySupport') | Should Be $false
+                $settings.ContainsKey('http.electronFetch') | Should Be $false
             }
             finally {
                 Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue

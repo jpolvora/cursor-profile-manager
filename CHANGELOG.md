@@ -14,10 +14,10 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ### Changed
 
+- **Proxied profile settings (v2.0.21)** — proxied launches write `"http.proxySupport": "override"` and `"http.electronFetch": true` in profile `User/settings.json` (matches Cursor defaults). Alternative proxy type also sets `GLOBAL_AGENT_*` env vars. `argv.json` syncs on every Start so switching default (8080) vs alternative (8081) updates the stored port.
 - **Agent Story dashboard UX** — project lists (sidebar and filter dropdown) sort by most recent captured request; interaction grid columns are resizable with visible dividers; request details panel starts collapsed; projects sidebar can collapse to a narrow strip; grid rows have an expand/collapse chevron and double-click toggles request details; interaction grid uses a styled purple scrollbar.
 - **Proxied launch argv.json** — RunProxied profiles now write `proxy-server`, `proxy-bypass-list`, and `ignore-certificate-errors` to `<user-data-dir>\argv.json` so Electron/Node subprocesses (agent chat, extension host) inherit the MITM proxy; requires a full Cursor restart after toggling.
 - **Proxied launch env** — added `GLOBAL_AGENT_HTTP_PROXY` / `GLOBAL_AGENT_HTTPS_PROXY`; process spawn copies the full environment block via `ProcessStartInfo` so proxy vars reach child processes reliably.
-- **Profile proxy settings** — proxied launches now write `"http.proxySupport": "on"` in the profile `User/settings.json` so extension/agent HTTP clients honor the configured proxy (was `override`).
 
 ### Added
 

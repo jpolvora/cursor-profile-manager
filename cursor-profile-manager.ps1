@@ -19,8 +19,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 2.0.20
-$script:AppVersionId = '2.0.20'
+# App-Version: 2.0.21
+$script:AppVersionId = '2.0.21'
 $script:AppDisplayName = 'Cursor Profile Manager'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
@@ -1935,10 +1935,10 @@ function Get-CursorProxyEnvironmentVariables {
         ALL_PROXY   = $proxyUrl
         NO_PROXY    = $noProxy
     }
+    $envVars.GLOBAL_AGENT_HTTP_PROXY = $proxyUrl
+    $envVars.GLOBAL_AGENT_HTTPS_PROXY = $proxyUrl
     if ($normalizedProxyType -eq 'default') {
         $envVars.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-        $envVars.GLOBAL_AGENT_HTTP_PROXY = $proxyUrl
-        $envVars.GLOBAL_AGENT_HTTPS_PROXY = $proxyUrl
     }
     return $envVars
 }
@@ -2354,7 +2354,8 @@ function Update-CursorProfileProxySettings {
         Write-JsonObjectHashtableToFile -Path $settingsPath -Data @{
             'http.proxy'           = (Get-CursorProxyUrl -ProxyType $normalizedProxyType)
             'http.proxyStrictSSL'  = $false
-            'http.proxySupport'    = 'on'
+            'http.proxySupport'    = 'override'
+            'http.electronFetch'   = $true
         }
         return
     }
@@ -2375,7 +2376,8 @@ function Update-CursorProfileProxySettings {
     if ($EnableProxy) {
         $settings['http.proxy'] = Get-CursorProxyUrl -ProxyType $normalizedProxyType
         $settings['http.proxyStrictSSL'] = $false
-        $settings['http.proxySupport'] = 'on'
+        $settings['http.proxySupport'] = 'override'
+        $settings['http.electronFetch'] = $true
     }
     else {
         if ($settings.ContainsKey('http.proxy')) {
@@ -2386,6 +2388,9 @@ function Update-CursorProfileProxySettings {
         }
         if ($settings.ContainsKey('http.proxySupport')) {
             $settings.Remove('http.proxySupport')
+        }
+        if ($settings.ContainsKey('http.electronFetch')) {
+            $settings.Remove('http.electronFetch')
         }
     }
 
