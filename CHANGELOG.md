@@ -4,6 +4,20 @@ All notable user-facing changes to Cursor Profile Manager.
 
 Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (when applicable). Newest dates first.
 
+## 2.0.9
+
+### Fixed
+
+- **Start Profile launch error** — resolved a null reference error ("You cannot call a method on a null-valued expression") in `Get-ProfileInstanceCount` that occurred when registering running proxied profiles.
+- **Diagnostics cleanup** — reverted temporary test hooks and startup/launch file logging intercepts.
+
+## 2.0.8
+
+### Fixed
+
+- **Profile Start launch error** — fixed a crash when the in-memory profiles list was nested (e.g. `@(@($p1,$p2))`), which made **Start** pass multiple profiles into launch and fail with `Cannot bind argument to parameter 'Path' because it is an empty string` on an empty optional project folder. Profile lookups and grid iteration now flatten the list; empty/whitespace project paths are ignored safely; launch errors show a **Launch Error** dialog instead of an unhandled PowerShell exception.
+- **Launch arguments** — `--user-data-dir` is quoted again (`--user-data-dir="<path>"`) so paths with spaces launch correctly.
+
 ## 2.0.7
 
 ### Fixed

@@ -18,8 +18,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 2.0.7
-$script:AppVersionId = '2.0.7'
+# App-Version: 2.0.9
+$script:AppVersionId = '2.0.9'
 $script:AppDisplayName = 'Cursor Profile Manager'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
@@ -523,6 +523,39 @@ function Ensure-ProfilesRoot {
     }
 }
 
+function Test-IsProfileObject {
+    param($Value)
+
+    return ($null -ne $Value) -and ($null -ne $Value.PSObject.Properties['Id'])
+}
+
+function Normalize-ProfilesList {
+    param([array]$Profiles)
+
+    if ($null -eq $Profiles) {
+        return @()
+    }
+
+    $flat = @()
+    foreach ($entry in @($Profiles)) {
+        if (Test-IsProfileObject $entry) {
+            $flat += $entry
+            continue
+        }
+        if ($null -eq $entry) { continue }
+        foreach ($inner in @($entry)) {
+            if (Test-IsProfileObject $inner) {
+                $flat += $inner
+            }
+        }
+    }
+    return $flat
+}
+
+function Get-ProfilesList {
+    return (Normalize-ProfilesList -Profiles $script:Profiles)
+}
+
 function Load-Profiles {
     Ensure-ProfilesRoot
     if (-not (Test-Path $ConfigPath)) {
@@ -541,7 +574,7 @@ function Load-Profiles {
             }
             $profilesList += $p
         }
-        return , $profilesList
+        return , (Normalize-ProfilesList -Profiles $profilesList)
     }
     catch {
         Write-Warning "Failed to read profiles.json: $($_.Exception.Message)"
@@ -1628,10 +1661,11 @@ function Register-RunningProxiedProfilesWithAgentStory {
         return
     }
 
-    foreach ($profile in $script:Profiles) {
+    $instanceCounts = Get-UserDataDirInstanceCounts
+    foreach ($profile in Get-ProfilesList) {
         if (-not $profile.RunProxied) { continue }
 
-        $instanceCount = Get-ProfileInstanceCount -UserDataDir $profile.UserDataDir
+        $instanceCount = Get-ProfileInstanceCount -UserDataDir $profile.UserDataDir -InstanceCounts $instanceCounts
         if ($instanceCount -le 0) { continue }
 
         $mainPid = 0
@@ -2238,8 +2272,14 @@ function Get-UserDataDirInstanceCounts {
 }
 
 function Get-ProfileInstanceCount {
-    param([string]$UserDataDir, [hashtable]$InstanceCounts)
+    param(
+        [string]$UserDataDir,
+        [hashtable]$InstanceCounts = $null
+    )
     if (-not $UserDataDir) { return 0 }
+    if ($null -eq $InstanceCounts) {
+        $InstanceCounts = Get-UserDataDirInstanceCounts
+    }
     $norm = $UserDataDir.TrimEnd('\', '/').ToLowerInvariant()
     if ($InstanceCounts.ContainsKey($norm)) {
         return [int]$InstanceCounts[$norm]
@@ -2444,7 +2484,7 @@ function Remove-Profile {
         }
     }
 
-    $script:Profiles = @($script:Profiles | Where-Object { $_.Id -ne $Profile.Id })
+    $script:Profiles = Normalize-ProfilesList -Profiles @($script:Profiles | Where-Object { $_.Id -ne $Profile.Id })
     Save-Profiles -Profiles $script:Profiles
     Update-ProfileGrid
     return $true
@@ -2459,8 +2499,18 @@ function Invoke-GridProfileAction {
     switch ($ActionName) {
         'ActStart' {
             if (-not (Test-CursorInstallReady)) { return }
-            Start-CursorProfileInstance -Profile $Profile
-            Request-DeferredGridRefresh
+            try {
+                Start-CursorProfileInstance -Profile $Profile
+                Request-DeferredGridRefresh
+            }
+            catch {
+                $profileName = if ($Profile -and $Profile.Name) { $Profile.Name } else { 'profile' }
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Failed to start profile '$profileName':`n`n$($_.Exception.Message)",
+                    'Launch Error',
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+            }
         }
         'ActFocus' {
             [void](Invoke-FocusCursorProfile -Profile $Profile)
@@ -2560,6 +2610,19 @@ function Start-CursorProfileInstance {
         [Parameter(Mandatory)][PSCustomObject]$Profile
     )
 
+    if ($Profile -is [System.Array]) {
+        if ($Profile.Count -eq 1) {
+            $Profile = $Profile[0]
+        }
+        else {
+            throw "Start expected a single profile, but received $($Profile.Count) profiles."
+        }
+    }
+
+    if (-not (Test-IsProfileObject $Profile)) {
+        throw 'Start expected a valid profile object.'
+    }
+
     $cursor = Find-CursorExecutable
     if (-not $cursor) {
         if (-not (Test-CursorInstallReady)) { return }
@@ -2567,23 +2630,31 @@ function Start-CursorProfileInstance {
         if (-not $cursor) { return }
     }
 
-    if (-not (Test-Path $Profile.UserDataDir)) {
+    if (-not (Test-Path -LiteralPath $Profile.UserDataDir)) {
         New-Item -ItemType Directory -Path $Profile.UserDataDir -Force | Out-Null
     }
 
+    $projectPath = ''
+    if ($null -ne $Profile.ProjectPath) {
+        $projectPath = [string]$Profile.ProjectPath
+        $projectPath = $projectPath.Trim()
+    }
+
     $projectExists = $false
-    if ($Profile.ProjectPath) {
-        if (Test-Path $Profile.ProjectPath) {
+    if (-not [string]::IsNullOrWhiteSpace($projectPath)) {
+        if (Test-Path -LiteralPath $projectPath) {
             $projectExists = $true
         }
         else {
             [System.Windows.Forms.MessageBox]::Show(
-                "Project path not found, opening without a folder:`n$($Profile.ProjectPath)",
+                "Project path not found, opening without a folder:`n$projectPath",
                 'Warning',
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
         }
     }
+
+    $userDataArg = "--user-data-dir=`"$($Profile.UserDataDir)`""
 
     $useProxy = $false
     $extraArgs = @()
@@ -2634,15 +2705,15 @@ function Start-CursorProfileInstance {
     # Cursor/VS Code reuses the existing window when the same folder is already open,
     # even with --new-window. Open an empty window, then --add the project folder.
     if ($runningCount -gt 0 -and $projectExists) {
-        Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList (@("--user-data-dir=$($Profile.UserDataDir)", '--new-window') + $extraArgs) -Environment $launchEnv -Profile $Profile | Out-Null
+        Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList (@($userDataArg, '--new-window') + $extraArgs) -Environment $launchEnv -Profile $Profile | Out-Null
         Start-Sleep -Milliseconds 800
-        Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList (@("--user-data-dir=$($Profile.UserDataDir)", '--add', $Profile.ProjectPath) + $extraArgs) -Environment $launchEnv -Profile $Profile -RegisterProfile:$false | Out-Null
+        Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList (@($userDataArg, '--add', $projectPath) + $extraArgs) -Environment $launchEnv -Profile $Profile -RegisterProfile:$false | Out-Null
         return
     }
 
-    $argList = @("--user-data-dir=$($Profile.UserDataDir)", '--new-window') + $extraArgs
+    $argList = @($userDataArg, '--new-window') + $extraArgs
     if ($projectExists) {
-        $argList += $Profile.ProjectPath
+        $argList += $projectPath
     }
 
     Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList $argList -Environment $launchEnv -Profile $Profile | Out-Null
@@ -2892,7 +2963,7 @@ function Build-GridModel {
     $order = New-Object 'System.Collections.Generic.List[string]'
     $rowsById = @{}
 
-    foreach ($p in $script:Profiles) {
+    foreach ($p in Get-ProfilesList) {
         $instanceCount = Get-ProfileInstanceCount -UserDataDir $p.UserDataDir -InstanceCounts $instanceCounts
         $row = New-GridRowModel -Profile $p -InstanceCount $instanceCount
         $order.Add($p.Id)
@@ -3075,7 +3146,7 @@ function Request-DeferredGridRefresh {
 function Get-SelectedProfile {
     if ($grid.SelectedRows.Count -eq 0) { return $null }
     $id = $grid.SelectedRows[0].Tag
-    return $script:Profiles | Where-Object { $_.Id -eq $id } | Select-Object -First 1
+    return Get-ProfilesList | Where-Object { $_.Id -eq $id } | Select-Object -First 1
 }
 
 function Get-ProfileFromGridRow {
@@ -3084,7 +3155,7 @@ function Get-ProfileFromGridRow {
     if ($RowIndex -lt 0 -or $RowIndex -ge $grid.Rows.Count) { return $null }
     $id = $grid.Rows[$RowIndex].Tag
     if (-not $id) { return $null }
-    return $script:Profiles | Where-Object { $_.Id -eq $id } | Select-Object -First 1
+    return Get-ProfilesList | Where-Object { $_.Id -eq $id } | Select-Object -First 1
 }
 
 function Start-ProfileFromGridRow {
@@ -3093,9 +3164,20 @@ function Start-ProfileFromGridRow {
     $profile = Get-ProfileFromGridRow -RowIndex $RowIndex
     if (-not $profile) { return $false }
     if (-not (Test-CursorInstallReady)) { return $false }
-    Start-CursorProfileInstance -Profile $profile
-    Request-DeferredGridRefresh
-    return $true
+    try {
+        Start-CursorProfileInstance -Profile $profile
+        Request-DeferredGridRefresh
+        return $true
+    }
+    catch {
+        $profileName = if ($profile.Name) { $profile.Name } else { 'profile' }
+        [System.Windows.Forms.MessageBox]::Show(
+            "Failed to start profile '$profileName':`n`n$($_.Exception.Message)",
+            'Launch Error',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+        return $false
+    }
 }
 
 function Open-ProfileUserDataDir {
@@ -3178,7 +3260,7 @@ Ensure-ProfilesRoot
 Load-AppSettings
 Set-UiThemePalette -ThemeName (Get-EffectiveUiThemeName)
 
-$script:Profiles = Load-Profiles
+$script:Profiles = Normalize-ProfilesList -Profiles @(Load-Profiles)
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = Get-AppWindowTitle
@@ -3457,12 +3539,12 @@ $btnAdd.Add_Click({
 
     $result = Show-ProfileDialog -Existing $null
     if ($result) {
-        if ($script:Profiles | Where-Object { $_.Name -eq $result.Name }) {
+        if (Get-ProfilesList | Where-Object { $_.Name -eq $result.Name }) {
             [System.Windows.Forms.MessageBox]::Show("A profile named '$($result.Name)' already exists.", 'Duplicate name', 'OK', 'Warning') | Out-Null
             return
         }
         $newProfile = New-ProfileObject -Name $result.Name -UserDataDir $result.UserDataDir -ProjectPath $result.ProjectPath -Notes $result.Notes -RunProxied $result.RunProxied
-        $script:Profiles = @($script:Profiles) + $newProfile
+        $script:Profiles = Normalize-ProfilesList -Profiles (@(Get-ProfilesList) + $newProfile)
         Save-Profiles -Profiles $script:Profiles
         Update-ProfileGrid
     }

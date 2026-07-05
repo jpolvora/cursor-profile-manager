@@ -97,6 +97,13 @@ Describe 'Grid model' {
         It 'returns zero when the profile path is not running' {
             Get-ProfileInstanceCount -UserDataDir 'C:\missing' -InstanceCounts @{} | Should Be 0
         }
+
+        It 'handles null or omitted InstanceCounts' {
+            $val1 = Get-ProfileInstanceCount -UserDataDir 'C:\any-path'
+            $val2 = Get-ProfileInstanceCount -UserDataDir 'C:\any-path' -InstanceCounts $null
+            $val1 | Should Be 0
+            $val2 | Should Be 0
+        }
     }
 
     Context 'Build-GridModel' {

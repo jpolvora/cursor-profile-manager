@@ -32,7 +32,7 @@ Describe 'Profile and settings storage' {
             $profile = New-TestProfile -Name 'alpha'
             Save-Profiles -Profiles @($profile)
 
-            $loaded = Load-Profiles
+            $loaded = @(Load-Profiles)
             $loaded.Count | Should Be 1
             $loaded[0].Name | Should Be 'alpha'
             $loaded[0].Id | Should Be $profile.Id
@@ -43,7 +43,7 @@ Describe 'Profile and settings storage' {
             $badPath = Join-Path $global:ProfileManagerTestProfilesDir 'profiles.json'
             Set-Content -Path $badPath -Value $json -Encoding UTF8
 
-            $loaded = Load-Profiles
+            $loaded = @(Load-Profiles)
             $loaded.Count | Should Be 1
             $loaded[0].RunProxied | Should Be $false
         }
@@ -54,6 +54,23 @@ Describe 'Profile and settings storage' {
 
             $profiles = Load-Profiles
             $profiles.Count | Should Be 0
+        }
+    }
+
+    Context 'Normalize-ProfilesList' {
+        It 'flattens a nested profiles array' {
+            $p1 = New-TestProfile -Name 'one'
+            $p2 = New-TestProfile -Name 'two'
+            $nested = , @($p1, $p2)
+
+            $flat = Normalize-ProfilesList -Profiles $nested
+            $flat.Count | Should Be 2
+            $flat[0].Name | Should Be 'one'
+            $flat[1].Name | Should Be 'two'
+        }
+
+        It 'returns an empty list for null input' {
+            (Normalize-ProfilesList -Profiles $null).Count | Should Be 0
         }
     }
 
