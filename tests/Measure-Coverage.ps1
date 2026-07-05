@@ -147,7 +147,7 @@ $areas = @{
     'Grid model / view' = 'Grid|ProfileGrid|ProfileFromGrid|SelectedProfile|Start-ProfileFromGrid'
     'Process / launch' = 'UserDataDir|CursorProcess|CursorProfile|Focus|Close|Start-Cursor|Find-Cursor|Get-Cursor'
     'Theme / UI chrome' = 'UiTheme|Toolbar|DataGrid|Button|FormIcon|ThemeCombo|CheckUpdateLink|CursorInstall'
-    'Win32 / single instance' = 'Win32|SingleInstance|ExistingAppWindow'
+    'Win32 focus' = 'Win32|ForceForeground|Get-CursorProfileWindowHandles'
     'Dialogs / actions' = 'Show-|Edit-Profile|Remove-Profile|Invoke-Grid|Open-Profile|Test-CursorInstall'
     'WMI watchers' = 'ProcessWatcher|DeferredGridRefresh'
 }

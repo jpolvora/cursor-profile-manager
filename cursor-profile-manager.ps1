@@ -18,10 +18,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 1.3.9
-$AppWindowTitle = 'Cursor Profile Manager'
-$SingleInstanceMutexName = 'Local\CursorProfileManager_GUI_v1'
-$script:AppVersionId = '1.3.9'
+# App-Version: 2.0.0
+$script:AppVersionId = '2.0.0'
+$script:AppDisplayName = 'Cursor Profile Manager'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
 $script:AgentStoryProxyProcess = $null
@@ -29,6 +28,7 @@ $script:AgentStoryUiProcess = $null
 $script:btnAgentStory = $null
 $script:lblAgentStoryStatus = $null
 $script:sepAgentStory = $null
+$script:UiShuttingDown = $false
 $script:InstallRoot = $PSScriptRoot
 $script:UpdateRepoId = 'jpolvora/cursor-profile-manager'
 $script:UpdateBranch = 'master'
@@ -37,6 +37,39 @@ $script:UpdateManagedFiles = @(
     'cursor-profile-manager.bat',
     'install-desktop-shortcut.ps1'
 )
+
+function Get-AppDisplayName {
+    return $script:AppDisplayName
+}
+
+function Get-AppVersionId {
+    return $script:AppVersionId
+}
+
+function Get-AppVersionLabel {
+    param([string]$VersionId)
+
+    if (-not $PSBoundParameters.ContainsKey('VersionId')) {
+        $VersionId = Get-AppVersionId
+    }
+    if ([string]::IsNullOrWhiteSpace($VersionId)) {
+        return ''
+    }
+    return "v$VersionId"
+}
+
+function Get-AppWindowTitle {
+    param([string]$VersionId)
+
+    if (-not $PSBoundParameters.ContainsKey('VersionId')) {
+        $VersionId = Get-AppVersionId
+    }
+    $label = Get-AppVersionLabel -VersionId $VersionId
+    if ([string]::IsNullOrWhiteSpace($label)) {
+        return Get-AppDisplayName
+    }
+    return "$(Get-AppDisplayName) $label"
+}
 
 function Initialize-Win32AppFocus {
     if ('Win32AppFocus' -as [type]) { return }
@@ -50,8 +83,6 @@ public static class Win32AppFocus {
     public const uint WM_CLOSE = 0x0010;
     private const uint GW_OWNER = 4;
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    public static extern IntPtr FindWindow(string lpClassName, string lpWindowTitle);
     [DllImport("user32.dll")]
     public static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")]
@@ -128,39 +159,38 @@ public static class Win32AppFocus {
 '@
 }
 
-function Show-ExistingAppWindow {
-    param([Parameter(Mandatory)][string]$WindowTitle)
+function Test-DriveRootAccessible {
+    param(
+        [Parameter(Mandatory)][string]$Path
+    )
 
-    Initialize-Win32AppFocus
-
-    for ($attempt = 0; $attempt -lt 15; $attempt++) {
-        $hwnd = [Win32AppFocus]::FindWindow($null, $WindowTitle)
-        if ($hwnd -ne [IntPtr]::Zero) {
-            [Win32AppFocus]::ForceForegroundWindow($hwnd)
-            return $true
-        }
-        Start-Sleep -Milliseconds 100
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $true
     }
-    return $false
+    if ($Path -match '^([A-Za-z]:)[\\/]?') {
+        return Test-Path -LiteralPath ($Matches[1] + '\')
+    }
+    return $true
 }
 
-function Initialize-SingleInstance {
-    param([Parameter(Mandatory)][string]$MutexName)
+function Assert-LaunchPathsReady {
+    if (-not (Test-DriveRootAccessible -Path $script:InstallRoot)) {
+        throw @"
+Install folder drive is not available:
+$($script:InstallRoot)
 
-    $createdNew = $false
-    $mutex = New-Object System.Threading.Mutex($true, $MutexName, [ref]$createdNew)
-    if ($createdNew) {
-        $script:AppInstanceMutex = $mutex
-        return
+If you moved the repo or removed a drive, launch from cursor-profile-manager.bat in the current folder or run install-desktop-shortcut.ps1 to recreate your Desktop shortcut.
+"@
     }
 
-    $mutex.Dispose()
-    [void](Show-ExistingAppWindow -WindowTitle $AppWindowTitle)
-    exit 0
-}
+    if (-not (Test-DriveRootAccessible -Path $ProfilesRoot)) {
+        throw @"
+Profiles folder drive is not available:
+$ProfilesRoot
 
-if (-not $FunctionsOnly) {
-    [void](Initialize-SingleInstance -MutexName $SingleInstanceMutexName)
+Check CURSOR_PROFILES_DIR or reconnect the drive, then try again.
+"@
+    }
 }
 Initialize-Win32AppFocus
 
@@ -930,7 +960,7 @@ function Get-RemoteUpdateFileContent {
 function Set-CheckUpdateLinkDisplay {
     if (-not $script:CheckUpdateLink) { return }
 
-    $versionText = "v$($script:AppVersionId)  "
+    $versionText = "$(Get-AppVersionLabel)  "
     $linkText = 'Check for updates'
     $script:CheckUpdateLink.Text = $versionText + $linkText
     $script:CheckUpdateLink.Links.Clear()
@@ -1369,8 +1399,8 @@ function Get-ListenerProcessIdsForPort {
     $pids = @()
     $seen = @{}
     try {
-        $matches = netstat -ano | Select-String -Pattern ":$Port\s+.*LISTENING"
-        foreach ($line in $matches) {
+        $listeningLines = @(netstat -ano | Select-String -Pattern ":$Port\s+.*LISTENING")
+        foreach ($line in $listeningLines) {
             if ($line -match '\s+(\d+)\s*$') {
                 $procId = [int]$Matches[1]
                 if (-not $seen.ContainsKey($procId)) {
@@ -1424,7 +1454,9 @@ function Stop-AgentStory {
 }
 
 function Update-AgentStoryUiState {
+    if ($script:UiShuttingDown) { return }
     if (-not $script:btnAgentStory -or -not $script:lblAgentStoryStatus) { return }
+    if ($form -and $form.IsDisposed) { return }
 
     $proxyRunning = Test-AgentStoryProxyRunning
     $uiRunning = Test-AgentStoryProcessAlive -Process $script:AgentStoryUiProcess
@@ -2071,16 +2103,23 @@ function Start-CursorProcessWatchers {
 
     $handler = [System.Management.EventArrivedEventHandler]{
         param($sender, $e)
-        if ($OwnerForm.IsDisposed) { return }
+        if ($OwnerForm.IsDisposed -or $script:UiShuttingDown) { return }
         if ($OwnerForm.InvokeRequired) {
             [void]$OwnerForm.BeginInvoke([Action]{
-                $DebounceTimer.Stop()
-                $DebounceTimer.Start()
+                if ($script:UiShuttingDown) { return }
+                try {
+                    $DebounceTimer.Stop()
+                    $DebounceTimer.Start()
+                }
+                catch { }
             })
         }
         else {
-            $DebounceTimer.Stop()
-            $DebounceTimer.Start()
+            try {
+                $DebounceTimer.Stop()
+                $DebounceTimer.Start()
+            }
+            catch { }
         }
     }
 
@@ -2680,6 +2719,46 @@ function Open-ProfileUserDataDir {
 
 if ($FunctionsOnly) { return }
 
+function Show-StartupFailure {
+    param(
+        [Parameter(Mandatory)][string]$Message
+    )
+
+    try {
+        [System.Windows.Forms.MessageBox]::Show(
+            $Message,
+            (Get-AppWindowTitle),
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+    }
+    catch {
+        Write-Error $Message
+    }
+}
+
+function Invoke-UiRefreshSafe {
+    param(
+        [Parameter(Mandatory)][scriptblock]$Action
+    )
+
+    if ($script:UiShuttingDown) { return }
+    if ($form -and $form.IsDisposed) { return }
+
+    try {
+        & $Action
+    }
+    catch [System.Management.Automation.PipelineStoppedException] {
+        # Runspace stopping during shutdown — ignore.
+    }
+    catch {
+        Write-Warning "UI refresh failed: $($_.Exception.Message)"
+    }
+}
+
+$script:StartupFailed = $false
+try {
+Assert-LaunchPathsReady
 Ensure-ProfilesRoot
 Load-AppSettings
 Set-UiThemePalette -ThemeName (Get-EffectiveUiThemeName)
@@ -2687,7 +2766,7 @@ Set-UiThemePalette -ThemeName (Get-EffectiveUiThemeName)
 $script:Profiles = Load-Profiles
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = $AppWindowTitle
+$form.Text = Get-AppWindowTitle
 $form.Size = New-Object System.Drawing.Size(980, 520)
 $form.StartPosition = 'CenterScreen'
 $form.MinimumSize = New-Object System.Drawing.Size(900, 420)
@@ -2993,24 +3072,29 @@ $processEventDebounce = New-Object System.Windows.Forms.Timer
 $processEventDebounce.Interval = 500
 $script:ProcessEventDebounceTimer = $processEventDebounce
 $processEventDebounce.Add_Tick({
-    $processEventDebounce.Stop()
-    Update-ProfileGrid
+    Invoke-UiRefreshSafe {
+        $processEventDebounce.Stop()
+        Update-ProfileGrid
+    }
 })
 
 $refreshTimer = New-Object System.Windows.Forms.Timer
 $refreshTimer.Interval = 2000
 $refreshTimer.Add_Tick({
-    if (Test-UiSystemThemeChanged) {
-        Set-UiThemePreference -Preference $script:UiThemePreference
+    Invoke-UiRefreshSafe {
+        if (Test-UiSystemThemeChanged) {
+            Set-UiThemePreference -Preference $script:UiThemePreference
+        }
+        Update-ProfileGrid
+        Update-AgentStoryUiState
     }
-    Update-ProfileGrid
-    Update-AgentStoryUiState
 })
 $refreshTimer.Start()
 
 Start-CursorProcessWatchers -OwnerForm $form -DebounceTimer $processEventDebounce
 
 $form.Add_FormClosing({
+    $script:UiShuttingDown = $true
     $refreshTimer.Stop()
     $processEventDebounce.Stop()
     Stop-CursorProcessWatchers
@@ -3022,13 +3106,13 @@ Update-CursorInstallUi
 
 Update-ProfileGrid
 
-try {
     [void]$form.ShowDialog()
 }
-finally {
-    if ($script:AppInstanceMutex) {
-        try { $script:AppInstanceMutex.ReleaseMutex() } catch { }
-        $script:AppInstanceMutex.Dispose()
-        $script:AppInstanceMutex = $null
-    }
+catch {
+    Show-StartupFailure -Message "Cursor Profile Manager failed to start:`n`n$($_.Exception.Message)"
+    $script:StartupFailed = $true
+}
+
+if ($script:StartupFailed) {
+    exit 1
 }

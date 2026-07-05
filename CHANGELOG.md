@@ -4,6 +4,63 @@ All notable user-facing changes to Cursor Profile Manager.
 
 Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (when applicable). Newest dates first.
 
+## 2.0.0
+
+### Removed
+
+- **Single-instance lock** — multiple Profile Manager windows may run at once; mutex, legacy title matching, and stale-instance recovery removed.
+
+### Changed
+
+- Release marker set to **2.0.0** (`# App-Version` / `$script:AppVersionId`).
+
+## 2026-07-05 (9)
+
+### Fixed
+
+- **`B:/` drive not found on launch** — usually a Desktop shortcut or working directory still pointing at an old drive after the repo moved. The `.bat` launcher now `cd`s to its own folder first; startup validates install/profiles drives and shows a clear error; re-run `install-desktop-shortcut.ps1` to refresh the shortcut path and versioned name.
+
+- Release marker bumped to **1.3.15** (`# App-Version` / `$script:AppVersionId`).
+
+## 2026-07-05 (8)
+
+### Fixed
+
+- **Launch appears to do nothing** — single-instance focus now tries both the versioned title and the legacy `Cursor Profile Manager` title (pre-v1.3.12). If another copy holds the lock but no window is found, a warning dialog is shown instead of exiting silently.
+
+- Release marker bumped to **1.3.14** (`# App-Version` / `$script:AppVersionId`).
+
+## 2026-07-05 (7)
+
+### Changed
+
+- **Window title / version** — added `Get-AppVersionId`, `Get-AppVersionLabel`, `Get-AppDisplayName`, and `Get-AppWindowTitle` so the title bar and footer always derive from `$script:AppVersionId`; bump the version markers only, never a separate title string.
+
+- Release marker bumped to **1.3.13** (`# App-Version` / `$script:AppVersionId`).
+
+## 2026-07-05 (6)
+
+### Changed
+
+- Main window title now includes the release version (e.g. **Cursor Profile Manager v1.3.12**) so it is easy to tell apart from a Cursor IDE window editing this repo.
+
+- Release marker bumped to **1.3.12** (`# App-Version` / `$script:AppVersionId`).
+
+## 2026-07-05 (5)
+
+### Fixed
+
+- **Timer crash (`PipelineStoppedException`)** — refresh and debounce timer handlers now run inside a safe wrapper that catches pipeline-stop and other errors instead of crashing the GUI. Shutdown sets a flag so in-flight ticks skip grid/port updates. Port-listener parsing no longer reuses `$matches` (conflicts with the `-match` automatic `$Matches` variable).
+
+- Release marker bumped to **1.3.11** (`# App-Version` / `$script:AppVersionId`).
+
+## 2026-07-05 (4)
+
+### Fixed
+
+- **Silent startup failure** — if a prior instance crashed while holding the single-instance lock, a new launch now recovers instead of exiting with no window. Startup errors also show a message box (and the `.bat` wrapper reports failure).
+- Release marker bumped to **1.3.10** (`# App-Version` / `$script:AppVersionId`).
+
 ## 2026-07-05 (3)
 
 ### Fixed

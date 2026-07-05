@@ -10,13 +10,13 @@
     the shortcut after moving this folder.
 
 .PARAMETER Name
-    Shortcut display name (without .lnk). Default: "Cursor Profile Manager".
+    Shortcut display name (without .lnk). Default: versioned window title from the main script.
 
 .EXAMPLE
     .\install-desktop-shortcut.ps1
 #>
 param(
-    [string]$Name = 'Cursor Profile Manager'
+    [string]$Name
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,6 +26,12 @@ $TargetPs1 = Join-Path $RepoRoot 'cursor-profile-manager.ps1'
 
 if (-not (Test-Path $TargetPs1)) {
     throw "Could not find cursor-profile-manager.ps1 next to this script ($RepoRoot)."
+}
+
+. $TargetPs1 -FunctionsOnly
+
+if ([string]::IsNullOrWhiteSpace($Name)) {
+    $Name = Get-AppWindowTitle
 }
 
 function Find-CursorIcon {

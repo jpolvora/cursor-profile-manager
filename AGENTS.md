@@ -78,16 +78,28 @@ Override with `CURSOR_PROFILES_DIR`. Override binary with `CURSOR_BIN`.
 
 ## App version ID
 
-The main script carries a release marker used by **Check for updates**:
+The main script carries a release marker used by **Check for updates**, the **window title**, and the footer version label:
 
 ```powershell
-# App-Version: 1.3.2
-$script:AppVersionId = '1.3.2'
+# App-Version: 2.0.0
+$script:AppVersionId = '2.0.0'
+$script:AppDisplayName = 'Cursor Profile Manager'
 ```
+
+**Do not hardcode the window title or footer `v#.#.#` text.** Derive them via helpers (defined near the top of `cursor-profile-manager.ps1`):
+
+| Helper | Returns | Used for |
+|--------|---------|----------|
+| `Get-AppVersionId` | `$script:AppVersionId` | update check, tests |
+| `Get-AppDisplayName` | `$script:AppDisplayName` | title base name |
+| `Get-AppVersionLabel` | `v2.0.0` (or `''` when unset) | footer link prefix |
+| `Get-AppWindowTitle` | `Cursor Profile Manager v2.0.0` | `$form.Text`, error dialogs |
 
 Rules:
 
 - Keep **both** the `# App-Version:` comment and `$script:AppVersionId` in sync in `cursor-profile-manager.ps1`.
+- When bumping the version, update **only** those two markers — the window title and footer label update automatically through the helpers.
+- Use `Get-AppWindowTitle` (not a literal string) anywhere the manager window title is needed.
 - Use dotted numeric segments (`major.minor.patch`, e.g. `1.2.0`). The updater compares segment by segment as integers.
 - **Increment the version** after every improvement session or commit that changes shipped behavior or scripts, so GitHub `master` and local installs can detect newer releases.
 - Update check treats a missing marker (local or remote) as **outdated**. When both markers exist, apply an update only if GitHub’s version is **greater**; equal or older GitHub versions can still be **force reinstalled** with confirmation.
@@ -114,8 +126,7 @@ Rules:
 High-level flow in `cursor-profile-manager.ps1`:
 
 ```text
-Initialize-SingleInstance (mutex)
-  → Load profiles from profiles.json
+Load profiles from profiles.json
   → Build WinForms main window + DataGridView
   → GridModel (in-memory state) ← Build-GridModel ← process scan
   → Update-ProfileGrid (diff model; sync view only on change)
@@ -126,7 +137,6 @@ Key modules inside the script:
 
 | Area | Functions | Notes |
 |------|-----------|-------|
-| Single instance | `Initialize-SingleInstance`, `Show-ExistingAppWindow`, `Initialize-Win32AppFocus` | Named mutex + Win32 foreground |
 | Storage | `Load-Profiles`, `Save-Profiles`, `New-ProfileObject`, `Load-AppSettings`, `Save-AppSettings` | UTF-8 JSON |
 | UI theme | `Get-UiThemePalettes`, `Test-WindowsAppsUseLightTheme`, `Set-UiThemePalette`, `Set-UiThemePreference`, `Apply-UiThemeToMainWindow` | Light/dark palettes; `default` follows Windows `AppsUseLightTheme` |
 | In-app update | `Invoke-CheckForAppUpdate`, `Get-AppVersionIdFromScriptContent`, `Compare-AppVersionId`, `Start-DeferredAppUpdate` | Raw GitHub `master` files; version compare via `# App-Version` / `$script:AppVersionId`; deferred copy after exit |
@@ -220,7 +230,7 @@ Tests use a temp `CURSOR_PROFILES_DIR` — never the user’s real `~/.cursor-pr
 3. Start same profile again → Instances column shows `2`; both windows share profile data.
 4. Start a second profile on same project → both profiles independent.
 5. Close one Cursor window → Instances decrements.
-6. Launch manager twice → second launch focuses existing window (no duplicate manager).
+6. Launch manager twice → two independent manager windows open.
 7. Status / Instances update within ~2 s of process start or exit.
 
 ---
@@ -271,7 +281,7 @@ $UiStartLabel = "Start $([char]0x25B6)"        # Start ▶
 
 ### State
 
-- App-wide mutable state: **`$script:VariableName`** (profiles list, grid model, mutex, timers).
+- App-wide mutable state: **`$script:VariableName`** (profiles list, grid model, timers).
 - Avoid `$global:` unless truly necessary.
 - Separate **data model from view** (`$script:GridModel` vs `DataGridView` rows) and sync only on diff.
 
@@ -281,14 +291,13 @@ $UiStartLabel = "Start $([char]0x25B6)"        # Start ▶
 - Enable **`DoubleBuffered`** on `DataGridView` via reflection (non-public property).
 - Wrap bulk UI changes in **`SuspendLayout()` / `ResumeLayout($true)`**.
 - Update cells **in place**; compare values before assigning to reduce flicker.
-- Wire **`FormClosing`** (and `try/finally` after `ShowDialog`) to stop timers, dispose WMI watchers, release mutex, hide tray icon.
+- Wire **`FormClosing`** (and cleanup after `ShowDialog`) to stop timers and dispose WMI watchers.
 - WMI / background callbacks that touch UI must **`$form.BeginInvoke([Action]{ ... })`** — never update controls from the WMI thread.
 
 ### Native interop
 
-- Use **`Add-Type`** with a here-string for small Win32 needs (foreground window, mutex is managed).
+- Use **`Add-Type`** with a here-string for small Win32 needs (foreground window, WM_CLOSE).
 - Guard `Add-Type` with `if (-not ('TypeName' -as [type]))` so re-dot-sourcing does not fail.
-- Prefer **`Local\` mutex names** for per-user single-instance (`Local\CursorProfileManager_GUI_v1`).
 
 ### Process and WMI
 
@@ -308,7 +317,7 @@ $UiStartLabel = "Start $([char]0x25B6)"        # Start ▶
 
 - **Early return** when `$script:GridModel` equals newly built model — skip grid paint on idle polls.
 - Do not poll faster than needed; 2 s fallback + WMI is enough for status.
-- Avoid **`Start-Sleep` in the UI thread** except short debounce / single-instance window lookup retries.
+- Avoid **`Start-Sleep` in the UI thread** except short debounce delays.
 
 ### What to avoid (pitfalls) - Lesson Learned (learnings)
 
@@ -334,6 +343,6 @@ $UiStartLabel = "Start $([char]0x25B6)"        # Start ▶
 3. Does it need periodic UI refresh? → Extend `Build-GridModel` + `Test-GridModelEqual`; do not bypass the model.
 4. New user-visible strings with symbols? → `[char]` code points or ASCII labels.
 5. **Add a `CHANGELOG.md` entry** (Added / Changed / Removed / Fixed).
-6. **Bump `$script:AppVersionId` and `# App-Version:`** in `cursor-profile-manager.ps1` when shipped script behavior changes.
+6. **Bump `$script:AppVersionId` and `# App-Version:`** in `cursor-profile-manager.ps1` when shipped script behavior changes. Do **not** edit the window title separately — use `Get-AppWindowTitle`.
 7. **Add or update unit tests** in `tests/` and run `.\run-tests.ps1`.
 8. Run smoke test (see above).

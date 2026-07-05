@@ -8,7 +8,7 @@ Tested with **Cursor 3.9+** (uses `--user-data-dir`; the legacy `--max-memory` f
 
 Each profile gets its own folder under `%USERPROFILE%\.cursor-profiles\` (override with `CURSOR_PROFILES_DIR`). That lets several Cursor windows open the **same project** at once without sharing account, extensions, or chat history.
 
-The Profile Manager itself is a **single-instance app**: only one manager window runs at a time. Launching it again (shortcut, `.bat`, or script) brings the existing window to the front.
+The Profile Manager window title is built dynamically as **Cursor Profile Manager v*version*** (via `Get-AppWindowTitle`) so it is distinct from a Cursor IDE window editing this repo. **Multiple manager windows** may run at once — each launch opens a new instance.
 
 ## Screenshots
 
@@ -66,7 +66,7 @@ Re-run after moving this folder to repair the shortcut.
 | **Grid columns** | Name, User Data Dir, Instances, Status, Proxy, Notes, Actions (default project folder is edited in Add/Edit only) |
 | **Agent Story** | Start/stop the Agent Story proxy and dashboard directly from the toolbar. Run proxied profiles automatically route traffic to the proxy |
 | **Live updates** | WMI process create/exit events + 2 s fallback poll; grid updates only when data changes |
-| **Single instance** | Second launch activates the existing manager window |
+| **Multiple manager windows** | Each launch opens a new manager instance (no singleton lock) |
 | **Persistence** | Profiles saved to `profiles.json` in the profiles directory |
 | **Theme** | Light, dark, or **System default** (follows Windows app theme); bottom-toolbar dropdown; saved in `settings.json` |
 | **Check for updates** | Footer link (with current `v#.#.#` beside it) compares `App-Version` markers against GitHub `master` and overwrites the install folder in place (`.bat` and Desktop shortcuts keep working) |
@@ -170,7 +170,7 @@ Click **Check for updates** in the footer status bar. The manager reads the `# A
 
 On apply, it downloads `cursor-profile-manager.ps1`, `cursor-profile-manager.bat`, and `install-desktop-shortcut.ps1`, replaces them in the folder you launched from, then restarts. Existing `.bat` launchers and Desktop shortcuts keep working.
 
-Current release marker in the main script: `# App-Version: 1.3.9` / `$script:AppVersionId` (also shown in the footer as `v1.3.9`).
+Current release marker in the main script: `# App-Version: 2.0.0` / `$script:AppVersionId` (window title and footer derive from these via `Get-AppWindowTitle` / `Get-AppVersionLabel`).
 
 ## Unit tests
 

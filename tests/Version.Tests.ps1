@@ -103,4 +103,35 @@ $script:AppVersionId = '1.4.0'
             $status.CanForceUpdate | Should Be $true
         }
     }
+
+    Context 'App identity helpers' {
+        It 'keeps App-Version comment and AppVersionId assignment in sync' {
+            $repoRoot = Split-Path -Parent $PSScriptRoot
+            $content = Get-Content (Join-Path $repoRoot 'cursor-profile-manager.ps1') -Raw -Encoding UTF8
+            $fromComment = Get-AppVersionIdFromScriptContent -Content $content
+            Get-AppVersionId | Should Be $fromComment
+        }
+
+        It 'derives the version label from AppVersionId' {
+            Get-AppVersionLabel | Should Be "v$(Get-AppVersionId)"
+        }
+
+        It 'derives the window title from AppVersionId' {
+            Get-AppWindowTitle | Should Be "$(Get-AppDisplayName) v$(Get-AppVersionId)"
+        }
+
+        It 'accepts an explicit version for the window title' {
+            Get-AppWindowTitle -VersionId '9.9.9' | Should Be "$(Get-AppDisplayName) v9.9.9"
+        }
+    }
+
+    Context 'Launch path validation' {
+        It 'returns false when a drive root is missing' {
+            Test-DriveRootAccessible -Path 'B:\missing\folder' | Should Be $false
+        }
+
+        It 'returns true for a UNC-style path without a drive letter' {
+            Test-DriveRootAccessible -Path '\\server\share\folder' | Should Be $true
+        }
+    }
 }
