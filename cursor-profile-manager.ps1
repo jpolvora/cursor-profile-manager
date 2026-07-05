@@ -19,8 +19,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 2.0.19
-$script:AppVersionId = '2.0.19'
+# App-Version: 2.0.20
+$script:AppVersionId = '2.0.20'
 $script:AppDisplayName = 'Cursor Profile Manager'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
@@ -33,8 +33,12 @@ $script:lnkAgentStoryOpen = $null
 $script:sepAgentStory = $null
 $script:AgentStoryUiUrl = 'http://localhost:5173/'
 $script:AgentStoryProxyUrl = 'http://127.0.0.1:8080'
+$script:AgentStoryPassThroughProxyUrl = 'http://127.0.0.1:8081'
+$script:AgentStoryPassThroughProcess = $null
 $script:CursorProxyBypassList = 'localhost;127.0.0.1;.github.com;github.com;.gitlab.com;gitlab.com;.bitbucket.org;bitbucket.org'
+$script:CursorProxyBypassListAlternative = 'localhost;127.0.0.1'
 $script:CursorNoProxyList = 'localhost,127.0.0.1,.github.com,github.com,.gitlab.com,gitlab.com,.bitbucket.org,bitbucket.org'
+$script:CursorNoProxyListAlternative = 'localhost,127.0.0.1'
 $script:ProfileContextMarkerFile = 'cursor-profile-manager.context.json'
 $script:UiShuttingDown = $false
 $script:InstallRoot = $PSScriptRoot
@@ -683,6 +687,9 @@ function Load-Profiles {
             if ($null -eq $p.psobject.Properties['RunProxied']) {
                 $p | Add-Member -MemberType NoteProperty -Name 'RunProxied' -Value $false -Force
             }
+            if ($null -eq $p.psobject.Properties['ProxyType']) {
+                $p | Add-Member -MemberType NoteProperty -Name 'ProxyType' -Value 'default' -Force
+            }
             $profilesList += $p
         }
         return , (Normalize-ProfilesList -Profiles $profilesList)
@@ -714,8 +721,10 @@ function New-ProfileObject {
         [string]$UserDataDir,
         [string]$ProjectPath,
         [string]$Notes,
-        [bool]$RunProxied = $false
+        [bool]$RunProxied = $false,
+        [AllowEmptyString()][string]$ProxyType = 'default'
     )
+    $normalizedProxyType = Get-ProfileProxyTypeFromValue -ProxyType $ProxyType
     [PSCustomObject]@{
         Id          = [guid]::NewGuid().ToString()
         Name        = $Name
@@ -723,6 +732,7 @@ function New-ProfileObject {
         ProjectPath = $ProjectPath
         Notes       = $Notes
         RunProxied  = $RunProxied
+        ProxyType   = $normalizedProxyType
         CreatedAt   = (Get-Date).ToString('s')
     }
 }
@@ -1788,49 +1798,231 @@ function Test-AgentStoryProxyRunning {
     return $false
 }
 
+function Get-ProfileProxyTypeFromValue {
+    param(
+        [AllowEmptyString()][string]$ProxyType = 'default'
+    )
+
+    if ($ProxyType -eq 'alternative') {
+        return 'alternative'
+    }
+    return 'default'
+}
+
+function Get-ProfileProxyType {
+    param(
+        [PSCustomObject]$Profile
+    )
+
+    if (-not $Profile) {
+        return 'default'
+    }
+    if ($null -ne $Profile.PSObject.Properties['ProxyType']) {
+        return (Get-ProfileProxyTypeFromValue -ProxyType ([string]$Profile.ProxyType))
+    }
+    return 'default'
+}
+
+function Get-ProfileProxyTypeIndex {
+    param(
+        [AllowEmptyString()][string]$ProxyType = 'default'
+    )
+
+    if ((Get-ProfileProxyTypeFromValue -ProxyType $ProxyType) -eq 'alternative') {
+        return 1
+    }
+    return 0
+}
+
+function Get-ProfileProxyTypeFromIndex {
+    param(
+        [int]$Index
+    )
+
+    if ($Index -eq 1) {
+        return 'alternative'
+    }
+    return 'default'
+}
+
+function Test-ProfileUsesAlternativeProxy {
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$Profile
+    )
+
+    return ((Get-ProfileProxyType -Profile $Profile) -eq 'alternative')
+}
+
 function Get-CursorProxyUrl {
+    param(
+        [AllowEmptyString()][string]$ProxyType = 'default'
+    )
+
+    if ((Get-ProfileProxyTypeFromValue -ProxyType $ProxyType) -eq 'alternative') {
+        if ($env:AGENT_STORY_PASS_THROUGH_PROXY_URL -and -not [string]::IsNullOrWhiteSpace($env:AGENT_STORY_PASS_THROUGH_PROXY_URL)) {
+            return $env:AGENT_STORY_PASS_THROUGH_PROXY_URL.Trim()
+        }
+        return $script:AgentStoryPassThroughProxyUrl
+    }
+
     if ($env:AGENT_STORY_PROXY_URL -and -not [string]::IsNullOrWhiteSpace($env:AGENT_STORY_PROXY_URL)) {
         return $env:AGENT_STORY_PROXY_URL.Trim()
     }
     return $script:AgentStoryProxyUrl
 }
 
+function Get-CursorProxyBypassList {
+    param(
+        [AllowEmptyString()][string]$ProxyType = 'default'
+    )
+
+    if ((Get-ProfileProxyTypeFromValue -ProxyType $ProxyType) -eq 'alternative') {
+        return $script:CursorProxyBypassListAlternative
+    }
+    return $script:CursorProxyBypassList
+}
+
+function Get-CursorProxyNoProxyList {
+    param(
+        [AllowEmptyString()][string]$ProxyType = 'default'
+    )
+
+    if ((Get-ProfileProxyTypeFromValue -ProxyType $ProxyType) -eq 'alternative') {
+        return $script:CursorNoProxyListAlternative
+    }
+    return $script:CursorNoProxyList
+}
+
 function Get-CursorProxyLaunchArgs {
     param(
-        [bool]$UseProxy
+        [bool]$UseProxy,
+        [AllowEmptyString()][string]$ProxyType = 'default'
     )
 
     if (-not $UseProxy) {
         return @()
     }
-    $proxyUrl = Get-CursorProxyUrl
-    return @(
+
+    $normalizedProxyType = Get-ProfileProxyTypeFromValue -ProxyType $ProxyType
+    $proxyUrl = Get-CursorProxyUrl -ProxyType $normalizedProxyType
+    $bypassList = Get-CursorProxyBypassList -ProxyType $normalizedProxyType
+    $args = @(
         "--proxy-server=$proxyUrl",
-        "--proxy-bypass-list=$script:CursorProxyBypassList",
-        '--ignore-certificate-errors'
+        "--proxy-bypass-list=$bypassList"
     )
+    if ($normalizedProxyType -eq 'default') {
+        $args += '--ignore-certificate-errors'
+    }
+    return , $args
 }
 
 function Get-CursorProxyEnvironmentVariables {
     param(
-        [bool]$UseProxy
+        [bool]$UseProxy,
+        [AllowEmptyString()][string]$ProxyType = 'default'
     )
 
     if (-not $UseProxy) {
         return @{}
     }
 
-    $proxyUrl = Get-CursorProxyUrl
-    # Windows process env keys are case-insensitive (HTTP_PROXY == http_proxy for Node/Chromium).
-    return @{
-        HTTP_PROXY                   = $proxyUrl
-        HTTPS_PROXY                  = $proxyUrl
-        ALL_PROXY                    = $proxyUrl
-        NO_PROXY                     = $script:CursorNoProxyList
-        NODE_TLS_REJECT_UNAUTHORIZED = '0'
-        GLOBAL_AGENT_HTTP_PROXY      = $proxyUrl
-        GLOBAL_AGENT_HTTPS_PROXY     = $proxyUrl
+    $normalizedProxyType = Get-ProfileProxyTypeFromValue -ProxyType $ProxyType
+    $proxyUrl = Get-CursorProxyUrl -ProxyType $normalizedProxyType
+    $noProxy = Get-CursorProxyNoProxyList -ProxyType $normalizedProxyType
+    $envVars = @{
+        HTTP_PROXY  = $proxyUrl
+        HTTPS_PROXY = $proxyUrl
+        ALL_PROXY   = $proxyUrl
+        NO_PROXY    = $noProxy
     }
+    if ($normalizedProxyType -eq 'default') {
+        $envVars.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+        $envVars.GLOBAL_AGENT_HTTP_PROXY = $proxyUrl
+        $envVars.GLOBAL_AGENT_HTTPS_PROXY = $proxyUrl
+    }
+    return $envVars
+}
+
+function Test-AgentStoryPassThroughProxyRunning {
+    if (Test-AgentStoryServicePortListening -Port 8081) {
+        return $true
+    }
+    if (Test-AgentStoryProcessAlive -Process $script:AgentStoryPassThroughProcess) {
+        return (Test-AgentStoryServicePortListening -Port 8081)
+    }
+    return $false
+}
+
+function Start-AgentStoryPassThroughProxy {
+    if (Test-AgentStoryPassThroughProxyRunning) {
+        return $true
+    }
+
+    Stop-ListenerProcessesForPort -Port 8081
+    Start-Sleep -Milliseconds 200
+
+    $root = Find-AgentStoryRoot
+    if (-not $root) {
+        Show-AgentStoryStartFailure -Message "Agent Story directory not found. Expected agent-story\ under the manager install folder, or set AGENT_STORY_DIR to override."
+        return $false
+    }
+
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $nodeCmd) {
+        Show-AgentStoryStartFailure -Message 'Node.js is required to run the pass-through discovery proxy.'
+        return $false
+    }
+
+    if (Test-TcpPortInUse -Port 8081) {
+        Show-AgentStoryStartFailure -Message 'Pass-through proxy port 8081 is already in use. Stop the other process and try again.'
+        return $false
+    }
+
+    $serverDir = Join-Path $root 'server'
+    if (-not (Ensure-NodeDependencies -Dir $serverDir -Name 'Server')) { return $false }
+
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $nodeCmd.Source
+        $psi.Arguments = 'passThroughProxy.js'
+        $psi.WorkingDirectory = $serverDir
+        $psi.CreateNoWindow = $true
+        $psi.UseShellExecute = $false
+        $script:AgentStoryPassThroughProcess = [System.Diagnostics.Process]::Start($psi)
+    }
+    catch {
+        Show-AgentStoryStartFailure -Message "Failed to start pass-through proxy: $($_.Exception.Message)"
+        return $false
+    }
+
+    $deadline = (Get-Date).AddSeconds(8)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Test-AgentStoryProcessAlive -Process $script:AgentStoryPassThroughProcess)) {
+            Show-AgentStoryStartFailure -Message 'Pass-through proxy exited before binding port 8081.'
+            return $false
+        }
+        if (Test-AgentStoryPassThroughProxyRunning) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 200
+    }
+
+    Show-AgentStoryStartFailure -Message 'Pass-through proxy started but port 8081 is not listening.'
+    return $false
+}
+
+function Stop-AgentStoryPassThroughProxy {
+    if ($script:AgentStoryPassThroughProcess) {
+        try {
+            if (-not $script:AgentStoryPassThroughProcess.HasExited) {
+                & taskkill.exe /F /T /PID $script:AgentStoryPassThroughProcess.Id | Out-Null
+            }
+        }
+        catch { }
+        $script:AgentStoryPassThroughProcess = $null
+    }
+
+    Stop-ListenerProcessesForPort -Port 8081
 }
 
 function Get-CursorProfileContextMarkerPath {
@@ -2092,11 +2284,13 @@ function Write-JsonObjectHashtableToFileNoBom {
 function Update-CursorProfileArgvProxy {
     param(
         [Parameter(Mandatory)][string]$UserDataDir,
-        [bool]$EnableProxy
+        [bool]$EnableProxy,
+        [AllowEmptyString()][string]$ProxyType = 'default'
     )
 
     $argvPath = Get-CursorProfileArgvPath -UserDataDir $UserDataDir
     $argv = @{}
+    $normalizedProxyType = Get-ProfileProxyTypeFromValue -ProxyType $ProxyType
 
     if (Test-Path $argvPath) {
         try {
@@ -2110,9 +2304,14 @@ function Update-CursorProfileArgvProxy {
 
     $proxyKeys = @('proxy-server', 'proxy-bypass-list', 'ignore-certificate-errors')
     if ($EnableProxy) {
-        $argv['proxy-server'] = Get-CursorProxyUrl
-        $argv['proxy-bypass-list'] = $script:CursorProxyBypassList
-        $argv['ignore-certificate-errors'] = $true
+        $argv['proxy-server'] = Get-CursorProxyUrl -ProxyType $normalizedProxyType
+        $argv['proxy-bypass-list'] = Get-CursorProxyBypassList -ProxyType $normalizedProxyType
+        if ($normalizedProxyType -eq 'default') {
+            $argv['ignore-certificate-errors'] = $true
+        }
+        elseif ($argv.ContainsKey('ignore-certificate-errors')) {
+            $argv.Remove('ignore-certificate-errors')
+        }
     }
     else {
         foreach ($key in $proxyKeys) {
@@ -2135,9 +2334,11 @@ function Update-CursorProfileArgvProxy {
 function Update-CursorProfileProxySettings {
     param(
         [Parameter(Mandatory)][string]$UserDataDir,
-        [bool]$EnableProxy
+        [bool]$EnableProxy,
+        [AllowEmptyString()][string]$ProxyType = 'default'
     )
 
+    $normalizedProxyType = Get-ProfileProxyTypeFromValue -ProxyType $ProxyType
     $userDir = Join-Path $UserDataDir 'User'
     if (-not (Test-Path $userDir)) {
         New-Item -ItemType Directory -Path $userDir -Force | Out-Null
@@ -2151,7 +2352,7 @@ function Update-CursorProfileProxySettings {
         }
 
         Write-JsonObjectHashtableToFile -Path $settingsPath -Data @{
-            'http.proxy'           = Get-CursorProxyUrl
+            'http.proxy'           = (Get-CursorProxyUrl -ProxyType $normalizedProxyType)
             'http.proxyStrictSSL'  = $false
             'http.proxySupport'    = 'on'
         }
@@ -2172,7 +2373,7 @@ function Update-CursorProfileProxySettings {
     $settings = Read-JsonObjectHashtableFromFile -Path $settingsPath
 
     if ($EnableProxy) {
-        $settings['http.proxy'] = Get-CursorProxyUrl
+        $settings['http.proxy'] = Get-CursorProxyUrl -ProxyType $normalizedProxyType
         $settings['http.proxyStrictSSL'] = $false
         $settings['http.proxySupport'] = 'on'
     }
@@ -2549,6 +2750,8 @@ function Stop-AgentStory {
         } catch {}
         $script:AgentStoryUiProcess = $null
     }
+
+    Stop-AgentStoryPassThroughProxy
 
     foreach ($port in @(8080, 3001, 5173)) {
         Stop-ListenerProcessesForPort -Port $port
@@ -3163,6 +3366,11 @@ function Edit-Profile {
         } else {
             $Profile.RunProxied = $result.RunProxied
         }
+        if ($null -eq $Profile.psobject.Properties['ProxyType']) {
+            $Profile | Add-Member -MemberType NoteProperty -Name 'ProxyType' -Value $result.ProxyType -Force
+        } else {
+            $Profile.ProxyType = $result.ProxyType
+        }
         Save-Profiles -Profiles $script:Profiles
         Update-ProfileGrid
         return $true
@@ -3352,6 +3560,7 @@ function Start-CursorProfileInstance {
             -Message 'Launch requested' -Details @{
                 userDataDir = $Profile.UserDataDir
                 runProxied  = [bool]$Profile.RunProxied
+                proxyType   = (Get-ProfileProxyType -Profile $Profile)
             }
 
         $cursor = Find-CursorExecutable
@@ -3408,49 +3617,93 @@ function Start-CursorProfileInstance {
         $useProxy = $false
         $extraArgs = @()
         $proxyEnv = @{}
+        $proxyType = Get-ProfileProxyType -Profile $Profile
         if ($Profile.RunProxied) {
-            $proxyRunning = Test-AgentStoryProxyRunning
+            if ($proxyType -eq 'alternative') {
+                $proxyRunning = Test-AgentStoryPassThroughProxyRunning
+                if (-not $proxyRunning) {
+                    $startProxy = [System.Windows.Forms.MessageBox]::Show(
+                        @(
+                            'This profile uses the Alternative pass-through discovery proxy (port 8081).'
+                            'It is not running.'
+                            ''
+                            'Start it now? Traffic is logged to agent-story\server\pass-through-proxy.log'
+                            'without MITM decryption. Run npm run analyze-pass-through-log afterward.'
+                        ) -join "`n",
+                        'Pass-Through Proxy Not Running',
+                        [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+                        [System.Windows.Forms.MessageBoxIcon]::Question
+                    )
 
-            if (-not $proxyRunning) {
-                $startProxy = [System.Windows.Forms.MessageBox]::Show(
-                    "This profile is configured to run proxied, but the Agent Story proxy is not running.`n`nWould you like to start the Agent Story proxy now?",
-                    "Agent Story Proxy Not Running",
-                    [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
-                    [System.Windows.Forms.MessageBoxIcon]::Question
-                )
-
-                if ($startProxy -eq [System.Windows.Forms.DialogResult]::Yes) {
-                    $started = Start-AgentStoryProxy
-                    if ($started) {
-                        $proxyRunning = Test-AgentStoryProxyRunning
+                    if ($startProxy -eq [System.Windows.Forms.DialogResult]::Yes) {
+                        $started = Start-AgentStoryPassThroughProxy
+                        if ($started) {
+                            $proxyRunning = Test-AgentStoryPassThroughProxyRunning
+                        }
+                        else {
+                            Write-ProfileLaunchLogEntry -Level ERROR -ProfileName $profileName -ProfileId $profileId `
+                                -Message 'Launch aborted: pass-through proxy failed to start'
+                            Show-ProfileLaunchFailure -ProfileName $profileName `
+                                -ErrorMessage 'Pass-through discovery proxy failed to start.'
+                            return
+                        }
+                    }
+                    elseif ($startProxy -eq [System.Windows.Forms.DialogResult]::No) {
+                        $proxyRunning = $false
+                        Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
+                            -Message 'Launch continuing without proxy (user declined pass-through start)'
                     }
                     else {
-                        Write-ProfileLaunchLogEntry -Level ERROR -ProfileName $profileName -ProfileId $profileId `
-                            -Message 'Launch aborted: Agent Story proxy failed to start'
-                        Show-ProfileLaunchFailure -ProfileName $profileName `
-                            -ErrorMessage 'Agent Story proxy failed to start.'
+                        Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
+                            -Message 'Launch cancelled by user (pass-through proxy prompt)'
                         return
                     }
                 }
-                elseif ($startProxy -eq [System.Windows.Forms.DialogResult]::No) {
-                    $proxyRunning = $false
-                    Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
-                        -Message 'Launch continuing without proxy (user declined proxy start)'
-                }
-                else {
-                    Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
-                        -Message 'Launch cancelled by user (proxy prompt)'
-                    return
+            }
+            else {
+                $proxyRunning = Test-AgentStoryProxyRunning
+
+                if (-not $proxyRunning) {
+                    $startProxy = [System.Windows.Forms.MessageBox]::Show(
+                        "This profile is configured to run proxied, but the Agent Story proxy is not running.`n`nWould you like to start the Agent Story proxy now?",
+                        "Agent Story Proxy Not Running",
+                        [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+                        [System.Windows.Forms.MessageBoxIcon]::Question
+                    )
+
+                    if ($startProxy -eq [System.Windows.Forms.DialogResult]::Yes) {
+                        $started = Start-AgentStoryProxy
+                        if ($started) {
+                            $proxyRunning = Test-AgentStoryProxyRunning
+                        }
+                        else {
+                            Write-ProfileLaunchLogEntry -Level ERROR -ProfileName $profileName -ProfileId $profileId `
+                                -Message 'Launch aborted: Agent Story proxy failed to start'
+                            Show-ProfileLaunchFailure -ProfileName $profileName `
+                                -ErrorMessage 'Agent Story proxy failed to start.'
+                            return
+                        }
+                    }
+                    elseif ($startProxy -eq [System.Windows.Forms.DialogResult]::No) {
+                        $proxyRunning = $false
+                        Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
+                            -Message 'Launch continuing without proxy (user declined proxy start)'
+                    }
+                    else {
+                        Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
+                            -Message 'Launch cancelled by user (proxy prompt)'
+                        return
+                    }
                 }
             }
 
             $useProxy = [bool]$proxyRunning
-            $extraArgs = Get-CursorProxyLaunchArgs -UseProxy:$useProxy
-            $proxyEnv = Get-CursorProxyEnvironmentVariables -UseProxy:$useProxy
+            $extraArgs = Get-CursorProxyLaunchArgs -UseProxy:$useProxy -ProxyType $proxyType
+            $proxyEnv = Get-CursorProxyEnvironmentVariables -UseProxy:$useProxy -ProxyType $proxyType
         }
 
-        Update-CursorProfileProxySettings -UserDataDir $Profile.UserDataDir -EnableProxy:$useProxy
-        Update-CursorProfileArgvProxy -UserDataDir $Profile.UserDataDir -EnableProxy:$useProxy
+        Update-CursorProfileProxySettings -UserDataDir $Profile.UserDataDir -EnableProxy:$useProxy -ProxyType $proxyType
+        Update-CursorProfileArgvProxy -UserDataDir $Profile.UserDataDir -EnableProxy:$useProxy -ProxyType $proxyType
 
         $launchEnv = Merge-Hashtables @(
             (Get-CursorProfileIdentityEnvironmentVariables -Profile $Profile),
@@ -3513,7 +3766,7 @@ function Show-ProfileDialog {
 
     $dlg = New-Object System.Windows.Forms.Form
     $dlg.Text = if ($isEdit) { "Edit Profile" } else { "Add Profile" }
-    $dlg.Size = New-Object System.Drawing.Size(500, 394)
+    $dlg.Size = New-Object System.Drawing.Size(500, 448)
     $dlg.StartPosition = 'CenterParent'
     $dlg.FormBorderStyle = 'FixedDialog'
     $dlg.MaximizeBox = $false
@@ -3637,6 +3890,37 @@ function Show-ProfileDialog {
 
     $y += 34
 
+    $lblProxyType = New-Object System.Windows.Forms.Label
+    $lblProxyType.Text = 'Proxy type:'
+    $lblProxyType.Location = New-Object System.Drawing.Point(20, ($y + 4))
+    $lblProxyType.Size = New-Object System.Drawing.Size($labelWidth, 20)
+    $lblProxyType.ForeColor = $script:UiTextPrimary
+    $lblProxyType.Enabled = $chkProxy.Checked
+    $dlg.Controls.Add($lblProxyType)
+
+    $cmbProxyType = New-Object System.Windows.Forms.ComboBox
+    $cmbProxyType.DropDownStyle = 'DropDownList'
+    $cmbProxyType.Location = New-Object System.Drawing.Point($fieldX, $y)
+    $cmbProxyType.Size = New-Object System.Drawing.Size($fieldWidth, 23)
+    $cmbProxyType.Enabled = $chkProxy.Checked
+    [void]$cmbProxyType.Items.Add('Default (MITM capture + dashboard)')
+    [void]$cmbProxyType.Items.Add('Alternative (pass-through log only)')
+    $proxyTypeIndex = 0
+    if ($isEdit) {
+        $proxyTypeIndex = Get-ProfileProxyTypeIndex -ProxyType (Get-ProfileProxyType -Profile $Existing)
+    }
+    $cmbProxyType.SelectedIndex = $proxyTypeIndex
+    $dlg.Controls.Add($cmbProxyType)
+
+    $syncProxyTypeEnabled = {
+        $enabled = $chkProxy.Checked
+        $lblProxyType.Enabled = $enabled
+        $cmbProxyType.Enabled = $enabled
+    }
+    $chkProxy.Add_CheckedChanged($syncProxyTypeEnabled)
+
+    $y += 38
+
     $sepHint = New-Object System.Windows.Forms.Panel
     $sepHint.Location = New-Object System.Drawing.Point(20, $y)
     $sepHint.Size = New-Object System.Drawing.Size(440, 1)
@@ -3681,6 +3965,8 @@ function Show-ProfileDialog {
     $dlg.CancelButton = $btnCancel
 
     Apply-UiThemeToTextInputs -TextBoxes @($txtName, $txtDir, $txtProj, $txtNotes)
+    $cmbProxyType.BackColor = $script:UiInputBackColor
+    $cmbProxyType.ForeColor = $script:UiInputForeColor
 
     if (-not $isEdit) {
         $txtName.Add_TextChanged({
@@ -3713,6 +3999,7 @@ function Show-ProfileDialog {
         ProjectPath = $txtProj.Text.Trim()
         Notes       = $txtNotes.Text.Trim()
         RunProxied  = $chkProxy.Checked
+        ProxyType   = Get-ProfileProxyTypeFromIndex -Index $cmbProxyType.SelectedIndex
     }
 }
 
@@ -4347,7 +4634,7 @@ $btnAdd.Add_Click({
             [System.Windows.Forms.MessageBox]::Show("A profile named '$($result.Name)' already exists.", 'Duplicate name', 'OK', 'Warning') | Out-Null
             return
         }
-        $newProfile = New-ProfileObject -Name $result.Name -UserDataDir $result.UserDataDir -ProjectPath $result.ProjectPath -Notes $result.Notes -RunProxied $result.RunProxied
+        $newProfile = New-ProfileObject -Name $result.Name -UserDataDir $result.UserDataDir -ProjectPath $result.ProjectPath -Notes $result.Notes -RunProxied $result.RunProxied -ProxyType $result.ProxyType
         $script:Profiles = Normalize-ProfilesList -Profiles (@(Get-ProfilesList) + $newProfile)
         Save-Profiles -Profiles $script:Profiles
         Update-ProfileGrid

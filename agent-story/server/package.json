@@ -4,9 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test metadata.test.js capture.test.js profileContext.test.js endpointAnalysis.test.js",
+    "test": "node --test metadata.test.js capture.test.js profileContext.test.js endpointAnalysis.test.js passThroughLogAnalysis.test.js",
     "analyze-endpoints": "node analyze-endpoints.js",
-    "start": "node index.js"
+    "analyze-pass-through-log": "node analyze-pass-through-log.js",
+    "start": "node index.js",
+    "start:pass-through": "node passThroughProxy.js"
   },
   "keywords": [],
   "author": "",

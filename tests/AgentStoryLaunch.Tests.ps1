@@ -146,6 +146,32 @@ Describe 'Cursor proxy launch helpers' {
                 }
             }
         }
+
+        It 'returns alternative pass-through URL on port 8081' {
+            Get-CursorProxyUrl -ProxyType 'alternative' | Should Be 'http://127.0.0.1:8081'
+        }
+    }
+
+    Context 'Get-ProfileProxyType' {
+        It 'defaults missing ProxyType to default' {
+            $profile = New-TestProfile -Name 'plain'
+            Get-ProfileProxyType -Profile $profile | Should Be 'default'
+        }
+
+        It 'reads alternative ProxyType from profile' {
+            $profile = New-TestProfile -Name 'alt' -RunProxied $true
+            $profile | Add-Member -NotePropertyName ProxyType -NotePropertyValue 'alternative' -Force
+            Get-ProfileProxyType -Profile $profile | Should Be 'alternative'
+        }
+    }
+
+    Context 'Get-CursorProxyLaunchArgs alternative' {
+        It 'uses localhost-only bypass and omits ignore-certificate-errors' {
+            $launchArgs = Get-CursorProxyLaunchArgs -UseProxy:$true -ProxyType 'alternative'
+            $launchArgs.Count | Should Be 2
+            $launchArgs[0] | Should Be '--proxy-server=http://127.0.0.1:8081'
+            $launchArgs[1] | Should Be '--proxy-bypass-list=localhost;127.0.0.1'
+        }
     }
 
     Context 'Get-CursorProxyLaunchArgs' {

@@ -8,6 +8,7 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 
 ### Added
 
+- **Alternative pass-through proxy** — profile **Proxy type: Alternative** routes Cursor through a discovery proxy on port **8081** that logs every CONNECT/HTTP host (no TLS MITM, minimal bypass) to `agent-story/server/pass-through-proxy.log`. Run `npm run analyze-pass-through-log` to compare hosts against the default MITM capture list.
 - **Clean Agent Story database** — toolbar **Clean DB** stops Agent Story, deletes the local SQLite capture database, and restarts Agent Story if it was running so you can wipe captured traffic and begin fresh.
 - **Agent Story endpoint analysis** — `GET /api/endpoints/summary` and `npm run analyze-endpoints` (in `agent-story/server`) aggregate captured Cursor traffic by host, category, and path; report written to `agent-story/docs/cursor-endpoints-analysis.md`.
 

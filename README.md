@@ -86,7 +86,9 @@ Re-run the shortcut installer if you move the folder to automatically repair the
 6. **Actions:** Use **Focus** to bring the active windows to the front, **Close** to terminate all instances of a profile, **Folder** to open the user-data directory in File Explorer, and **Edit** / **Del** to modify profile info.
 7. **Trace AI Interactions (v2):**
    * Edit a profile and check **Run proxied**.
-   * Toggle **Start Agent Story** on the manager toolbar to start the local proxy (port 8080) and dashboard (port 3001/5173).
+   * Choose **Proxy type**: **Default** (MITM capture + dashboard on port 8080) or **Alternative** (pass-through discovery log on port 8081 — logs every host Cursor connects to without decrypting TLS).
+   * Toggle **Start Agent Story** on the manager toolbar to start the local MITM proxy (port 8080) and dashboard (port 3001/5173) for **Default** profiles.
+   * For **Alternative** profiles, the pass-through proxy starts automatically on Start (port 8081); logs go to `agent-story\server\pass-through-proxy.log`. Analyze with `npm run analyze-pass-through-log` in `agent-story\server`.
    * Click **Open dashboard** to launch the React web app (`http://localhost:5173/`).
    * Click **Clean DB** to wipe the local Agent Story SQLite database (all captured interactions) and restart with a fresh database if Agent Story was running.
    * Start your proxied profile. *Note: Ensure all existing Cursor windows for that profile are closed before launching proxied, as environment variables and settings apply at startup.*
@@ -129,6 +131,7 @@ Profiles are scanned by looking at active `Cursor.exe` command lines via CIM `Wi
 | `AGENT_STORY_DIR` | Path to the Agent Story installation folder (defaults to `agent-story\` under the script directory). |
 | `AGENT_STORY_UI_URL` | Web dashboard URL (default: `http://localhost:5173/`). |
 | `AGENT_STORY_PROXY_URL` | MITM proxy listener address (default: `http://127.0.0.1:8080`). |
+| `AGENT_STORY_PASS_THROUGH_PROXY_URL` | Pass-through discovery proxy (default: `http://127.0.0.1:8081`). |
 
 ### Storage Schema
 
@@ -143,6 +146,7 @@ Saved under `<CURSOR_PROFILES_DIR>\profiles.json` (encoded in UTF-8):
     "ProjectPath": "L:\\source\\workspace-a",
     "Notes": "Dedicated work profile for Client A",
     "RunProxied": true,
+    "ProxyType": "default",
     "CreatedAt": "2026-06-30T12:00:00"
   }
 ]

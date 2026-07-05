@@ -2,3 +2,4 @@
 agent-story/server/agent-story.db
 agent-story/server/agent-story.db-wal
 agent-story/server/agent-story.db-shm
+agent-story/server/pass-through-proxy.log

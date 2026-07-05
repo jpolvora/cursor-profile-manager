@@ -48,6 +48,15 @@ Describe 'Profile and settings storage' {
             $loaded[0].RunProxied | Should Be $false
         }
 
+        It 'adds missing ProxyType property on load' {
+            $json = '[{"Id":"test-456","Name":"legacy","UserDataDir":"C:\\temp","ProjectPath":"","Notes":"","RunProxied":true,"CreatedAt":"2026-07-05T12:00:00"}]'
+            $path = Join-Path $global:ProfileManagerTestProfilesDir 'profiles.json'
+            Set-Content -Path $path -Value $json -Encoding UTF8
+
+            $loaded = @(Load-Profiles)
+            $loaded[0].ProxyType | Should Be 'default'
+        }
+
         It 'returns an empty list when profiles.json is corrupt' {
             $badPath = Join-Path $global:ProfileManagerTestProfilesDir 'profiles.json'
             Set-Content -Path $badPath -Value '{ not valid json' -Encoding UTF8
