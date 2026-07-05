@@ -124,7 +124,7 @@ Profiles are scanned by looking at active `Cursor.exe` command lines via CIM `Wi
 
 | Variable | Description |
 |:---|:---|
-| `CURSOR_PROFILES_DIR` | Root folder for profile subdirectories and the manager metadata (`profiles.json`, `settings.json`). |
+| `CURSOR_PROFILES_DIR` | Root folder for profile subdirectories and the manager metadata (`profiles.json`, `settings.json`, `launch.log`). |
 | `CURSOR_BIN` | Custom path to the `Cursor.exe` binary (otherwise auto-detected). |
 | `AGENT_STORY_DIR` | Path to the Agent Story installation folder (defaults to `agent-story\` under the script directory). |
 | `AGENT_STORY_UI_URL` | Web dashboard URL (default: `http://localhost:5173/`). |
@@ -147,6 +147,9 @@ Saved under `<CURSOR_PROFILES_DIR>\profiles.json` (encoded in UTF-8):
   }
 ]
 ```
+
+#### `launch.log`
+Append-only launch diagnostics saved under `<CURSOR_PROFILES_DIR>\launch.log`. Each **Start** writes INFO/WARN/ERROR lines with profile name, executable, arguments, PID, and outcome. If a launch fails, the **Launch Error** dialog shows the last ERROR line and this file path.
 
 #### `settings.json`
 Saved under `<CURSOR_PROFILES_DIR>\settings.json`:

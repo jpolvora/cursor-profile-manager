@@ -19,8 +19,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 2.0.17
-$script:AppVersionId = '2.0.17'
+# App-Version: 2.0.19
+$script:AppVersionId = '2.0.19'
 $script:AppDisplayName = 'Cursor Profile Manager'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
@@ -529,10 +529,109 @@ $ProfilesRoot = if ($env:CURSOR_PROFILES_DIR) { $env:CURSOR_PROFILES_DIR } else 
 $ConfigPath = Join-Path $ProfilesRoot 'profiles.json'
 $SettingsPath = Join-Path $ProfilesRoot 'settings.json'
 
+$script:ProfileLaunchLogFileName = 'launch.log'
+$script:LastProfileLaunchLogError = $null
+
 function Ensure-ProfilesRoot {
     if (-not (Test-Path $ProfilesRoot)) {
         New-Item -ItemType Directory -Path $ProfilesRoot -Force | Out-Null
     }
+}
+
+function Get-ProfileLaunchLogPath {
+    return Join-Path $ProfilesRoot $script:ProfileLaunchLogFileName
+}
+
+function Format-ProfileLaunchLogValue {
+    param([string]$Value)
+
+    if ($null -eq $Value) { return '' }
+    $text = [string]$Value
+    $text = $text -replace "[\r\n]+", ' '
+    if ($text -match '[\s=|]') {
+        return '"' + ($text -replace '"', '""') + '"'
+    }
+    return $text
+}
+
+function Write-ProfileLaunchLogEntry {
+    param(
+        [Parameter(Mandatory)][ValidateSet('INFO', 'WARN', 'ERROR')][string]$Level,
+        [string]$ProfileName = '',
+        [string]$ProfileId = '',
+        [Parameter(Mandatory)][string]$Message,
+        [hashtable]$Details = @{}
+    )
+
+    try {
+        Ensure-ProfilesRoot
+        $line = "$(Get-Date -Format 'o') $Level"
+        if (-not [string]::IsNullOrWhiteSpace($ProfileName)) {
+            $line += " profile=$(Format-ProfileLaunchLogValue -Value $ProfileName)"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ProfileId)) {
+            $line += " id=$ProfileId"
+        }
+        $line += " message=$(Format-ProfileLaunchLogValue -Value $Message)"
+        foreach ($key in ($Details.Keys | Sort-Object)) {
+            $line += " $key=$(Format-ProfileLaunchLogValue -Value $Details[$key])"
+        }
+
+        if ($Level -eq 'ERROR') {
+            $script:LastProfileLaunchLogError = $line
+        }
+
+        Add-Content -Path (Get-ProfileLaunchLogPath) -Value $line -Encoding UTF8 -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Failed to write profile launch log: $($_.Exception.Message)"
+    }
+}
+
+function Get-LastProfileLaunchLogError {
+    if (-not [string]::IsNullOrWhiteSpace($script:LastProfileLaunchLogError)) {
+        return $script:LastProfileLaunchLogError
+    }
+
+    $path = Get-ProfileLaunchLogPath
+    if (-not (Test-Path -LiteralPath $path)) {
+        return $null
+    }
+
+    try {
+        $lines = @(Get-Content -LiteralPath $path -Encoding UTF8 -ErrorAction Stop)
+        for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+            if ($lines[$i] -match '\sERROR\s') {
+                return $lines[$i]
+            }
+        }
+    }
+    catch {
+        Write-Warning "Failed to read profile launch log: $($_.Exception.Message)"
+    }
+
+    return $null
+}
+
+function Show-ProfileLaunchFailure {
+    param(
+        [string]$ProfileName = 'profile',
+        [Parameter(Mandatory)][string]$ErrorMessage
+    )
+
+    $lastLog = Get-LastProfileLaunchLogError
+    $logPath = Get-ProfileLaunchLogPath
+    $body = "Failed to start profile '$ProfileName':`n`n$ErrorMessage"
+    if (-not [string]::IsNullOrWhiteSpace($lastLog)) {
+        $body += "`n`nLast log entry:`n$lastLog"
+    }
+    $body += "`n`nFull log:`n$logPath"
+
+    [System.Windows.Forms.MessageBox]::Show(
+        $body,
+        'Launch Error',
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
 }
 
 function Test-IsProfileObject {
@@ -1833,12 +1932,61 @@ function Start-CursorProfileProcess {
         [bool]$RegisterProfile = $true
     )
 
-    $proc = Invoke-ProcessWithEnvironment -FilePath $ExecutablePath -ArgumentList $ArgumentList -Environment $Environment -PassThru
-    if ($RegisterProfile -and $proc -and -not $proc.HasExited) {
-        Write-CursorProfileContextMarker -Profile $Profile -MainProcessId $proc.Id
-        Register-CursorProfileWithAgentStory -Profile $Profile -MainProcessId $proc.Id
+    $profileName = if ($Profile.Name) { $Profile.Name } else { '(unnamed)' }
+    $argText = Join-ProcessArgumentListForWindows -ArgumentList $ArgumentList
+
+    Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $Profile.Id `
+        -Message 'Spawning Cursor process' -Details @{
+            executable    = $ExecutablePath
+            arguments     = $argText
+            registerPid   = $RegisterProfile
+            envVarCount   = $Environment.Count
+        }
+
+    try {
+        $proc = Invoke-ProcessWithEnvironment -FilePath $ExecutablePath -ArgumentList $ArgumentList -Environment $Environment -PassThru
+        if (-not $proc) {
+            Write-ProfileLaunchLogEntry -Level ERROR -ProfileName $profileName -ProfileId $Profile.Id `
+                -Message 'Process.Start returned null' -Details @{
+                    executable = $ExecutablePath
+                    arguments  = $argText
+                }
+            throw "Failed to start process: $ExecutablePath"
+        }
+
+        if ($proc.HasExited) {
+            $exitCode = $proc.ExitCode
+            Write-ProfileLaunchLogEntry -Level ERROR -ProfileName $profileName -ProfileId $Profile.Id `
+                -Message 'Cursor process exited immediately after launch' -Details @{
+                    pid      = $proc.Id
+                    exitCode = $exitCode
+                    arguments = $argText
+                }
+            throw "Cursor exited immediately (exit code $exitCode)."
+        }
+
+        Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $Profile.Id `
+            -Message 'Cursor process started' -Details @{
+                pid       = $proc.Id
+                arguments = $argText
+            }
+
+        if ($RegisterProfile -and $proc -and -not $proc.HasExited) {
+            Write-CursorProfileContextMarker -Profile $Profile -MainProcessId $proc.Id
+            Register-CursorProfileWithAgentStory -Profile $Profile -MainProcessId $proc.Id
+        }
+        return $proc
     }
-    return $proc
+    catch {
+        if ($_.Exception.Message -notmatch '^(Failed to start process:|Cursor exited immediately)') {
+            Write-ProfileLaunchLogEntry -Level ERROR -ProfileName $profileName -ProfileId $Profile.Id `
+                -Message $_.Exception.Message -Details @{
+                    executable = $ExecutablePath
+                    arguments  = $argText
+                }
+        }
+        throw
+    }
 }
 
 function Get-CursorProfileUserSettingsPath {
@@ -2043,6 +2191,57 @@ function Update-CursorProfileProxySettings {
     Write-JsonObjectHashtableToFile -Path $settingsPath -Data $settings
 }
 
+function Format-ProcessArgumentForWindows {
+    param(
+        [Parameter(Mandatory)][string]$Argument
+    )
+
+    if ($Argument -match '^[^\s"]*$') {
+        return $Argument
+    }
+
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append('"')
+    $backslashCount = 0
+    foreach ($ch in $Argument.ToCharArray()) {
+        if ($ch -eq [char]'\') {
+            $backslashCount++
+        }
+        elseif ($ch -eq [char]'"') {
+            if ($backslashCount -gt 0) {
+                [void]$sb.Append('\', ($backslashCount * 2 + 1))
+                $backslashCount = 0
+            }
+            else {
+                [void]$sb.Append('\')
+            }
+            [void]$sb.Append('"')
+        }
+        else {
+            if ($backslashCount -gt 0) {
+                [void]$sb.Append('\', $backslashCount)
+                $backslashCount = 0
+            }
+            [void]$sb.Append($ch)
+        }
+    }
+    if ($backslashCount -gt 0) {
+        [void]$sb.Append('\', ($backslashCount * 2))
+    }
+    [void]$sb.Append('"')
+    return $sb.ToString()
+}
+
+function Join-ProcessArgumentListForWindows {
+    param(
+        [Parameter(Mandatory)][string[]]$ArgumentList
+    )
+
+    return (($ArgumentList | ForEach-Object {
+        Format-ProcessArgumentForWindows -Argument ([string]$_)
+    }) -join ' ')
+}
+
 function Invoke-ProcessWithEnvironment {
     param(
         [Parameter(Mandatory)][string]$FilePath,
@@ -2062,15 +2261,7 @@ function Invoke-ProcessWithEnvironment {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $FilePath
     $psi.UseShellExecute = $false
-    $psi.Arguments = ($ArgumentList | ForEach-Object {
-        $arg = [string]$_
-        if ($arg -match '[\s"]') {
-            '"' + ($arg -replace '"', '\"') + '"'
-        }
-        else {
-            $arg
-        }
-    }) -join ' '
+    $psi.Arguments = Join-ProcessArgumentListForWindows -ArgumentList $ArgumentList
 
     foreach ($entry in [Environment]::GetEnvironmentVariables('Process').GetEnumerator()) {
         $null = $psi.EnvironmentVariables[$entry.Key] = [string]$entry.Value
@@ -3036,11 +3227,7 @@ function Invoke-GridProfileAction {
             }
             catch {
                 $profileName = if ($Profile -and $Profile.Name) { $Profile.Name } else { 'profile' }
-                [System.Windows.Forms.MessageBox]::Show(
-                    "Failed to start profile '$profileName':`n`n$($_.Exception.Message)",
-                    'Launch Error',
-                    [System.Windows.Forms.MessageBoxButtons]::OK,
-                    [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+                Show-ProfileLaunchFailure -ProfileName $profileName -ErrorMessage $_.Exception.Message
             }
         }
         'ActFocus' {
@@ -3141,114 +3328,176 @@ function Start-CursorProfileInstance {
         [Parameter(Mandatory)][PSCustomObject]$Profile
     )
 
-    if ($Profile -is [System.Array]) {
-        if ($Profile.Count -eq 1) {
-            $Profile = $Profile[0]
-        }
-        else {
-            throw "Start expected a single profile, but received $($Profile.Count) profiles."
-        }
-    }
+    $profileName = '(unknown)'
+    $profileId = ''
 
-    if (-not (Test-IsProfileObject $Profile)) {
-        throw 'Start expected a valid profile object.'
-    }
-
-    $cursor = Find-CursorExecutable
-    if (-not $cursor) {
-        if (-not (Test-CursorInstallReady)) { return }
-        $cursor = Find-CursorExecutable
-        if (-not $cursor) { return }
-    }
-
-    if (-not (Test-Path -LiteralPath $Profile.UserDataDir)) {
-        New-Item -ItemType Directory -Path $Profile.UserDataDir -Force | Out-Null
-    }
-
-    $projectPath = ''
-    if ($null -ne $Profile.ProjectPath) {
-        $projectPath = [string]$Profile.ProjectPath
-        $projectPath = $projectPath.Trim()
-    }
-
-    $projectExists = $false
-    if (-not [string]::IsNullOrWhiteSpace($projectPath)) {
-        if (Test-Path -LiteralPath $projectPath) {
-            $projectExists = $true
-        }
-        else {
-            [System.Windows.Forms.MessageBox]::Show(
-                "Project path not found, opening without a folder:`n$projectPath",
-                'Warning',
-                [System.Windows.Forms.MessageBoxButtons]::OK,
-                [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
-        }
-    }
-
-    $userDataArg = "--user-data-dir=`"$($Profile.UserDataDir)`""
-
-    $useProxy = $false
-    $extraArgs = @()
-    $proxyEnv = @{}
-    if ($Profile.RunProxied) {
-        $proxyRunning = Test-AgentStoryProxyRunning
-
-        if (-not $proxyRunning) {
-            $startProxy = [System.Windows.Forms.MessageBox]::Show(
-                "This profile is configured to run proxied, but the Agent Story proxy is not running.`n`nWould you like to start the Agent Story proxy now?",
-                "Agent Story Proxy Not Running",
-                [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
-                [System.Windows.Forms.MessageBoxIcon]::Question
-            )
-
-            if ($startProxy -eq [System.Windows.Forms.DialogResult]::Yes) {
-                $started = Start-AgentStoryProxy
-                if ($started) {
-                    $proxyRunning = Test-AgentStoryProxyRunning
-                }
-                else {
-                    return
-                }
-            }
-            elseif ($startProxy -eq [System.Windows.Forms.DialogResult]::No) {
-                $proxyRunning = $false
+    try {
+        if ($Profile -is [System.Array]) {
+            if ($Profile.Count -eq 1) {
+                $Profile = $Profile[0]
             }
             else {
+                throw "Start expected a single profile, but received $($Profile.Count) profiles."
+            }
+        }
+
+        if (-not (Test-IsProfileObject $Profile)) {
+            throw 'Start expected a valid profile object.'
+        }
+
+        $profileName = if ($Profile.Name) { $Profile.Name } else { '(unnamed)' }
+        $profileId = [string]$Profile.Id
+
+        Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
+            -Message 'Launch requested' -Details @{
+                userDataDir = $Profile.UserDataDir
+                runProxied  = [bool]$Profile.RunProxied
+            }
+
+        $cursor = Find-CursorExecutable
+        if (-not $cursor) {
+            if (-not (Test-CursorInstallReady)) {
+                Write-ProfileLaunchLogEntry -Level WARN -ProfileName $profileName -ProfileId $profileId `
+                    -Message 'Launch aborted: Cursor is not installed'
+                return
+            }
+            $cursor = Find-CursorExecutable
+            if (-not $cursor) {
+                Write-ProfileLaunchLogEntry -Level ERROR -ProfileName $profileName -ProfileId $profileId `
+                    -Message 'Launch failed: Cursor executable not found after install prompt'
+                Show-ProfileLaunchFailure -ProfileName $profileName `
+                    -ErrorMessage 'Cursor executable not found after install prompt.'
                 return
             }
         }
 
-        $useProxy = [bool]$proxyRunning
-        $extraArgs = Get-CursorProxyLaunchArgs -UseProxy:$useProxy
-        $proxyEnv = Get-CursorProxyEnvironmentVariables -UseProxy:$useProxy
+        if (-not (Test-Path -LiteralPath $Profile.UserDataDir)) {
+            New-Item -ItemType Directory -Path $Profile.UserDataDir -Force | Out-Null
+            Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
+                -Message 'Created profile user-data directory' -Details @{
+                    userDataDir = $Profile.UserDataDir
+                }
+        }
+
+        $projectPath = ''
+        if ($null -ne $Profile.ProjectPath) {
+            $projectPath = [string]$Profile.ProjectPath
+            $projectPath = $projectPath.Trim()
+        }
+
+        $projectExists = $false
+        if (-not [string]::IsNullOrWhiteSpace($projectPath)) {
+            if (Test-Path -LiteralPath $projectPath) {
+                $projectExists = $true
+            }
+            else {
+                Write-ProfileLaunchLogEntry -Level WARN -ProfileName $profileName -ProfileId $profileId `
+                    -Message 'Project path not found; launching without folder' -Details @{
+                        projectPath = $projectPath
+                    }
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Project path not found, opening without a folder:`n$projectPath",
+                    'Warning',
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+            }
+        }
+
+        $userDataArg = "--user-data-dir=$($Profile.UserDataDir)"
+
+        $useProxy = $false
+        $extraArgs = @()
+        $proxyEnv = @{}
+        if ($Profile.RunProxied) {
+            $proxyRunning = Test-AgentStoryProxyRunning
+
+            if (-not $proxyRunning) {
+                $startProxy = [System.Windows.Forms.MessageBox]::Show(
+                    "This profile is configured to run proxied, but the Agent Story proxy is not running.`n`nWould you like to start the Agent Story proxy now?",
+                    "Agent Story Proxy Not Running",
+                    [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+                    [System.Windows.Forms.MessageBoxIcon]::Question
+                )
+
+                if ($startProxy -eq [System.Windows.Forms.DialogResult]::Yes) {
+                    $started = Start-AgentStoryProxy
+                    if ($started) {
+                        $proxyRunning = Test-AgentStoryProxyRunning
+                    }
+                    else {
+                        Write-ProfileLaunchLogEntry -Level ERROR -ProfileName $profileName -ProfileId $profileId `
+                            -Message 'Launch aborted: Agent Story proxy failed to start'
+                        Show-ProfileLaunchFailure -ProfileName $profileName `
+                            -ErrorMessage 'Agent Story proxy failed to start.'
+                        return
+                    }
+                }
+                elseif ($startProxy -eq [System.Windows.Forms.DialogResult]::No) {
+                    $proxyRunning = $false
+                    Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
+                        -Message 'Launch continuing without proxy (user declined proxy start)'
+                }
+                else {
+                    Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
+                        -Message 'Launch cancelled by user (proxy prompt)'
+                    return
+                }
+            }
+
+            $useProxy = [bool]$proxyRunning
+            $extraArgs = Get-CursorProxyLaunchArgs -UseProxy:$useProxy
+            $proxyEnv = Get-CursorProxyEnvironmentVariables -UseProxy:$useProxy
+        }
+
+        Update-CursorProfileProxySettings -UserDataDir $Profile.UserDataDir -EnableProxy:$useProxy
+        Update-CursorProfileArgvProxy -UserDataDir $Profile.UserDataDir -EnableProxy:$useProxy
+
+        $launchEnv = Merge-Hashtables @(
+            (Get-CursorProfileIdentityEnvironmentVariables -Profile $Profile),
+            $proxyEnv
+        )
+
+        $instanceCounts = Get-UserDataDirInstanceCounts
+        $runningCount = Get-ProfileInstanceCount -UserDataDir $Profile.UserDataDir -InstanceCounts $instanceCounts
+
+        Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
+            -Message 'Launch configuration ready' -Details @{
+                cursor       = $cursor
+                projectPath  = $projectPath
+                useProxy     = $useProxy
+                runningCount = $runningCount
+                extraArgs    = ($extraArgs -join ' ')
+            }
+
+        # Cursor/VS Code reuses the existing window when the same folder is already open,
+        # even with --new-window. Open an empty window, then --add the project folder.
+        if ($runningCount -gt 0 -and $projectExists) {
+            Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
+                -Message 'Using reuse-window launch path (empty window then --add)' -Details @{
+                    projectPath = $projectPath
+                }
+            Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList (@($userDataArg, '--new-window') + $extraArgs) -Environment $launchEnv -Profile $Profile | Out-Null
+            Start-Sleep -Milliseconds 800
+            Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList (@($userDataArg, '--add', $projectPath) + $extraArgs) -Environment $launchEnv -Profile $Profile -RegisterProfile:$false | Out-Null
+            Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
+                -Message 'Launch completed successfully' -Details @{ mode = 'reuse-window-add' }
+            return
+        }
+
+        $argList = @($userDataArg, '--new-window') + $extraArgs
+        if ($projectExists) {
+            $argList += $projectPath
+        }
+
+        Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList $argList -Environment $launchEnv -Profile $Profile | Out-Null
+        Write-ProfileLaunchLogEntry -Level INFO -ProfileName $profileName -ProfileId $profileId `
+            -Message 'Launch completed successfully' -Details @{ mode = 'standard' }
     }
-
-    Update-CursorProfileProxySettings -UserDataDir $Profile.UserDataDir -EnableProxy:$useProxy
-    Update-CursorProfileArgvProxy -UserDataDir $Profile.UserDataDir -EnableProxy:$useProxy
-
-    $launchEnv = Merge-Hashtables @(
-        (Get-CursorProfileIdentityEnvironmentVariables -Profile $Profile),
-        $proxyEnv
-    )
-
-    $instanceCounts = Get-UserDataDirInstanceCounts
-    $runningCount = Get-ProfileInstanceCount -UserDataDir $Profile.UserDataDir -InstanceCounts $instanceCounts
-
-    # Cursor/VS Code reuses the existing window when the same folder is already open,
-    # even with --new-window. Open an empty window, then --add the project folder.
-    if ($runningCount -gt 0 -and $projectExists) {
-        Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList (@($userDataArg, '--new-window') + $extraArgs) -Environment $launchEnv -Profile $Profile | Out-Null
-        Start-Sleep -Milliseconds 800
-        Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList (@($userDataArg, '--add', $projectPath) + $extraArgs) -Environment $launchEnv -Profile $Profile -RegisterProfile:$false | Out-Null
-        return
+    catch {
+        Write-ProfileLaunchLogEntry -Level ERROR -ProfileName $profileName -ProfileId $profileId `
+            -Message $_.Exception.Message
+        throw
     }
-
-    $argList = @($userDataArg, '--new-window') + $extraArgs
-    if ($projectExists) {
-        $argList += $projectPath
-    }
-
-    Start-CursorProfileProcess -ExecutablePath $cursor -ArgumentList $argList -Environment $launchEnv -Profile $Profile | Out-Null
 }
 
 # ---------------------------------------------------------------------------
@@ -3703,11 +3952,7 @@ function Start-ProfileFromGridRow {
     }
     catch {
         $profileName = if ($profile.Name) { $profile.Name } else { 'profile' }
-        [System.Windows.Forms.MessageBox]::Show(
-            "Failed to start profile '$profileName':`n`n$($_.Exception.Message)",
-            'Launch Error',
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+        Show-ProfileLaunchFailure -ProfileName $profileName -ErrorMessage $_.Exception.Message
         return $false
     }
 }

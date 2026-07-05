@@ -18,8 +18,13 @@ Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (
 - **Proxied launch env** — added `GLOBAL_AGENT_HTTP_PROXY` / `GLOBAL_AGENT_HTTPS_PROXY`; process spawn copies the full environment block via `ProcessStartInfo` so proxy vars reach child processes reliably.
 - **Profile proxy settings** — proxied launches now write `"http.proxySupport": "on"` in the profile `User/settings.json` so extension/agent HTTP clients honor the configured proxy (was `override`).
 
+### Added
+
+- **Profile launch log** — every Start attempt appends to `<CURSOR_PROFILES_DIR>\launch.log` (alongside `profiles.json`) with profile name, executable, arguments, PID, and outcome. On failure, the **Launch Error** dialog includes the last ERROR log line and the log file path.
+
 ### Fixed
 
+- **Profile launch broken** — every Start used `ProcessStartInfo` with profile identity env vars; argument quoting wrapped embedded `--user-data-dir="..."` quotes again, so Cursor parsed an invalid path and failed to open. Launch args now use unquoted `--user-data-dir=<path>` values and Windows-correct quoting when custom env is set.
 - **Agent chat not captured** — agentic chat often bypassed `--proxy-server` on the main process only; argv.json plus extension proxy settings route Node agent traffic through Agent Story.
 - **Agent Story response-end blocking** — `onResponseEnd` no longer runs profile resolution (PowerShell/CIM) before calling the proxy forward callback; fast non-streaming API responses were still stalling the MITM path after the 2.0.12 non-blocking request fix.
 - **Agent Story streaming provisional capture** — provisional DB rows no longer trigger synchronous profile resolution during stream setup.

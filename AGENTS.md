@@ -73,7 +73,7 @@ When a new bug is fixed, **append a row or bullet here** (and add a **Fixed** ch
 
 | Path | Contents |
 |------|----------|
-| `%USERPROFILE%\.cursor-profiles\` | Profile data dirs + `profiles.json` + `settings.json` |
+| `%USERPROFILE%\.cursor-profiles\` | Profile data dirs + `profiles.json` + `settings.json` + `launch.log` |
 
 Override with `CURSOR_PROFILES_DIR`. Override binary with `CURSOR_BIN`.
 
@@ -144,7 +144,7 @@ Key modules inside the script:
 | UI theme | `Get-UiThemePalettes`, `Test-WindowsAppsUseLightTheme`, `Set-UiThemePalette`, `Set-UiThemePreference`, `Apply-UiThemeToMainWindow` | Light/dark palettes; `default` follows Windows `AppsUseLightTheme` |
 | In-app update | `Invoke-CheckForAppUpdate`, `Get-AppVersionIdFromScriptContent`, `Compare-AppVersionId`, `Start-DeferredAppUpdate` | Raw GitHub `master` files; version compare via `# App-Version` / `$script:AppVersionId`; deferred copy after exit |
 | Process scan | `Get-NormalizedUserDataDirFromCommandLine`, `Get-UserDataDirInstanceCountsFromProcessRecords`, `Get-UserDataDirInstanceCounts`, `Get-ProfileInstanceCount` | CIM `Win32_Process`; count `--type=renderer` per user-data-dir (one window each); parsing helpers are unit-tested with mock process records |
-| Launch | `Find-CursorExecutable`, `Find-CursorCliExecutable`, `Get-CursorInstallInfo`, `Test-CursorInstallReady`, `Show-CursorInstallDialog`, `Start-CursorProfileInstance`, `Get-CursorProxyUrl`, `Get-CursorProxyLaunchArgs`, `Get-CursorProxyEnvironmentVariables`, `Update-CursorProfileProxySettings`, `Write-CursorProfileContextMarker`, `Register-CursorProfileWithAgentStory`, `Start-CursorProfileProcess`, `Invoke-ProcessWithEnvironment` | Proxied launches set Chromium flags + Node proxy env + profile `http.proxy`; all launches write profile context marker and register PID with Agent Story |
+| Launch | `Find-CursorExecutable`, `Find-CursorCliExecutable`, `Get-CursorInstallInfo`, `Test-CursorInstallReady`, `Show-CursorInstallDialog`, `Start-CursorProfileInstance`, `Write-ProfileLaunchLogEntry`, `Get-LastProfileLaunchLogError`, `Show-ProfileLaunchFailure`, `Get-CursorProxyUrl`, `Get-CursorProxyLaunchArgs`, `Get-CursorProxyEnvironmentVariables`, `Update-CursorProfileProxySettings`, `Write-CursorProfileContextMarker`, `Register-CursorProfileWithAgentStory`, `Start-CursorProfileProcess`, `Invoke-ProcessWithEnvironment` | Proxied launches set Chromium flags + Node proxy env + profile `http.proxy`; all launches write profile context marker and register PID with Agent Story; append diagnostics to `launch.log` |
 | Focus | `Get-CursorProfileWindowHandles`, `Invoke-FocusCursorProfile` | EnumWindows by profile PIDs; cycles when multiple windows |
 | Close | `Invoke-CloseAllCursorProfileInstances` | WM_CLOSE on profile windows, then force-stop remaining PIDs |
 | Grid actions | `Add-GridActionColumns`, `Invoke-GridProfileAction`, `Sync-GridActionInstallState`, `Edit-Profile`, `Remove-Profile` | Per-row buttons: Start, Focus, Close, Folder, Edit, Del |
