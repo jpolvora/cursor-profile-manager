@@ -1,0 +1,316 @@
+# Instincts generated from https://github.com/jpolvora/cursor-profile-manager
+# Generated: 2026-07-23T17:45:46.656Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: cursor-profile-manager-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Commit Length
+
+## Action
+
+Write moderate-length commit messages (~58 characters)
+
+## Evidence
+
+- Average commit message length: 58 chars
+- Based on 3 commits
+
+---
+id: cursor-profile-manager-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Naming Files
+
+## Action
+
+Use PascalCase naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: PascalCase
+
+---
+id: cursor-profile-manager-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: cursor-profile-manager-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: cursor-profile-manager-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: cursor-profile-manager-instinct-function-naming
+trigger: "When creating a new function"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Instinct Function Naming
+
+## Action
+
+Name the function using camelCase
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.functions
+
+---
+id: cursor-profile-manager-instinct-class-naming
+trigger: "When defining a new class"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Instinct Class Naming
+
+## Action
+
+Name the class using PascalCase
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.classes
+
+---
+id: cursor-profile-manager-instinct-constant-naming
+trigger: "When declaring a constant"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Instinct Constant Naming
+
+## Action
+
+Name the constant using SCREAMING_SNAKE_CASE
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.constants
+
+---
+id: cursor-profile-manager-instinct-file-naming
+trigger: "When creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Instinct File Naming
+
+## Action
+
+Name the file using PascalCase
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.files
+
+---
+id: cursor-profile-manager-instinct-import-style
+trigger: "When importing modules in Python files"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Instinct Import Style
+
+## Action
+
+Use relative imports
+
+## Evidence
+
+- Pattern in codeStyle.importStyle
+
+---
+id: cursor-profile-manager-instinct-export-style
+trigger: "When exporting functions or classes from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in codeStyle.exportStyle
+
+---
+id: cursor-profile-manager-instinct-test-location
+trigger: "When adding new tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Instinct Test Location
+
+## Action
+
+Place test files in a separate directory from source code
+
+## Evidence
+
+- Pattern in architecture.folderStructure.testLocation
+
+---
+id: cursor-profile-manager-instinct-commit-prefix-docs
+trigger: "When making documentation-related changes"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Instinct Commit Prefix Docs
+
+## Action
+
+Prefix the commit message with 'docs'
+
+## Evidence
+
+- Seen in commit 'docs(github-pages-site): delivery plan and result'
+
+---
+id: cursor-profile-manager-instinct-commit-prefix-feat
+trigger: "When adding a new feature"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Instinct Commit Prefix Feat
+
+## Action
+
+Prefix the commit message with 'feat'
+
+## Evidence
+
+- Seen in commit 'feat(site): add GitHub Pages marketing site and deploy workflow'
+
+---
+id: cursor-profile-manager-instinct-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Instinct Commit Length
+
+## Action
+
+Keep the commit message concise, around 58 characters on average
+
+## Evidence
+
+- Pattern in commits.averageLength
+
+---
+id: cursor-profile-manager-instinct-github-pages-workflow
+trigger: "When deploying the marketing site"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: jpolvora/cursor-profile-manager
+---
+
+# Cursor Profile Manager Instinct Github Pages Workflow
+
+## Action
+
+Use the GitHub Actions workflow defined in '.github/workflows/pages.yml'
+
+## Evidence
+
+- Pattern in architecture.configFiles
+- Seen in commit 'feat(site): add GitHub Pages marketing site and deploy workflow'
+
