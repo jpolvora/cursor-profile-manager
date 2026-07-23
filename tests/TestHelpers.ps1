@@ -25,10 +25,11 @@ function New-TestProfile {
         [string]$UserDataDir = 'C:\Test\profile-a',
         [string]$ProjectPath = '',
         [string]$Notes = '',
-        [bool]$RunProxied = $false
+        [bool]$RunProxied = $false,
+        [AllowEmptyString()][string]$WindowMode = 'default'
     )
 
-    return New-ProfileObject -Name $Name -UserDataDir $UserDataDir -ProjectPath $ProjectPath -Notes $Notes -RunProxied $RunProxied
+    return New-ProfileObject -Name $Name -UserDataDir $UserDataDir -ProjectPath $ProjectPath -Notes $Notes -RunProxied $RunProxied -WindowMode $WindowMode
 }
 
 function New-TestCursorProcessRecord {

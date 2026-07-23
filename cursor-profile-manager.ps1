@@ -19,8 +19,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# App-Version: 2.0.21
-$script:AppVersionId = '2.0.21'
+# App-Version: 2.0.22
+$script:AppVersionId = '2.0.22'
 $script:AppDisplayName = 'Cursor Profile Manager'
 $script:CursorDownloadUrl = 'https://cursor.com/download'
 $script:GridActionColumnCount = 6
@@ -690,6 +690,12 @@ function Load-Profiles {
             if ($null -eq $p.psobject.Properties['ProxyType']) {
                 $p | Add-Member -MemberType NoteProperty -Name 'ProxyType' -Value 'default' -Force
             }
+            if ($null -eq $p.psobject.Properties['WindowMode']) {
+                $p | Add-Member -MemberType NoteProperty -Name 'WindowMode' -Value 'default' -Force
+            }
+            else {
+                $p.WindowMode = Get-ProfileWindowModeFromValue -WindowMode ([string]$p.WindowMode)
+            }
             $profilesList += $p
         }
         return , (Normalize-ProfilesList -Profiles $profilesList)
@@ -722,9 +728,11 @@ function New-ProfileObject {
         [string]$ProjectPath,
         [string]$Notes,
         [bool]$RunProxied = $false,
-        [AllowEmptyString()][string]$ProxyType = 'default'
+        [AllowEmptyString()][string]$ProxyType = 'default',
+        [AllowEmptyString()][string]$WindowMode = 'default'
     )
     $normalizedProxyType = Get-ProfileProxyTypeFromValue -ProxyType $ProxyType
+    $normalizedWindowMode = Get-ProfileWindowModeFromValue -WindowMode $WindowMode
     [PSCustomObject]@{
         Id          = [guid]::NewGuid().ToString()
         Name        = $Name
@@ -733,6 +741,7 @@ function New-ProfileObject {
         Notes       = $Notes
         RunProxied  = $RunProxied
         ProxyType   = $normalizedProxyType
+        WindowMode  = $normalizedWindowMode
         CreatedAt   = (Get-Date).ToString('s')
     }
 }
@@ -1914,6 +1923,78 @@ function Get-CursorProxyLaunchArgs {
         $args += '--ignore-certificate-errors'
     }
     return , $args
+}
+
+function Get-ProfileWindowModeFromValue {
+    param(
+        [AllowEmptyString()][string]$WindowMode = 'default'
+    )
+
+    if ($WindowMode -eq 'classic') {
+        return 'classic'
+    }
+    if ($WindowMode -eq 'glass') {
+        return 'glass'
+    }
+    return 'default'
+}
+
+function Get-ProfileWindowMode {
+    param(
+        [PSCustomObject]$Profile
+    )
+
+    if (-not $Profile) {
+        return 'default'
+    }
+    if ($null -ne $Profile.PSObject.Properties['WindowMode']) {
+        return (Get-ProfileWindowModeFromValue -WindowMode ([string]$Profile.WindowMode))
+    }
+    return 'default'
+}
+
+function Get-ProfileWindowModeIndex {
+    param(
+        [AllowEmptyString()][string]$WindowMode = 'default'
+    )
+
+    $normalized = Get-ProfileWindowModeFromValue -WindowMode $WindowMode
+    if ($normalized -eq 'classic') {
+        return 1
+    }
+    if ($normalized -eq 'glass') {
+        return 2
+    }
+    return 0
+}
+
+function Get-ProfileWindowModeFromIndex {
+    param(
+        [int]$Index
+    )
+
+    if ($Index -eq 1) {
+        return 'classic'
+    }
+    if ($Index -eq 2) {
+        return 'glass'
+    }
+    return 'default'
+}
+
+function Get-CursorWindowModeLaunchArgs {
+    param(
+        [AllowEmptyString()][string]$WindowMode = 'default'
+    )
+
+    $normalized = Get-ProfileWindowModeFromValue -WindowMode $WindowMode
+    if ($normalized -eq 'classic') {
+        return , @('--classic')
+    }
+    if ($normalized -eq 'glass') {
+        return , @('--glass')
+    }
+    return @()
 }
 
 function Get-CursorProxyEnvironmentVariables {
@@ -3376,6 +3457,11 @@ function Edit-Profile {
         } else {
             $Profile.ProxyType = $result.ProxyType
         }
+        if ($null -eq $Profile.psobject.Properties['WindowMode']) {
+            $Profile | Add-Member -MemberType NoteProperty -Name 'WindowMode' -Value $result.WindowMode -Force
+        } else {
+            $Profile.WindowMode = $result.WindowMode
+        }
         Save-Profiles -Profiles $script:Profiles
         Update-ProfileGrid
         return $true
@@ -3566,6 +3652,7 @@ function Start-CursorProfileInstance {
                 userDataDir = $Profile.UserDataDir
                 runProxied  = [bool]$Profile.RunProxied
                 proxyType   = (Get-ProfileProxyType -Profile $Profile)
+                windowMode  = (Get-ProfileWindowMode -Profile $Profile)
             }
 
         $cursor = Find-CursorExecutable
@@ -3707,6 +3794,10 @@ function Start-CursorProfileInstance {
             $proxyEnv = Get-CursorProxyEnvironmentVariables -UseProxy:$useProxy -ProxyType $proxyType
         }
 
+        $windowMode = Get-ProfileWindowMode -Profile $Profile
+        $windowModeArgs = Get-CursorWindowModeLaunchArgs -WindowMode $windowMode
+        $extraArgs = @($extraArgs) + @($windowModeArgs)
+
         Update-CursorProfileProxySettings -UserDataDir $Profile.UserDataDir -EnableProxy:$useProxy -ProxyType $proxyType
         Update-CursorProfileArgvProxy -UserDataDir $Profile.UserDataDir -EnableProxy:$useProxy -ProxyType $proxyType
 
@@ -3723,6 +3814,7 @@ function Start-CursorProfileInstance {
                 cursor       = $cursor
                 projectPath  = $projectPath
                 useProxy     = $useProxy
+                windowMode   = $windowMode
                 runningCount = $runningCount
                 extraArgs    = ($extraArgs -join ' ')
             }
@@ -3771,7 +3863,7 @@ function Show-ProfileDialog {
 
     $dlg = New-Object System.Windows.Forms.Form
     $dlg.Text = if ($isEdit) { "Edit Profile" } else { "Add Profile" }
-    $dlg.Size = New-Object System.Drawing.Size(500, 448)
+    $dlg.Size = New-Object System.Drawing.Size(500, 490)
     $dlg.StartPosition = 'CenterParent'
     $dlg.FormBorderStyle = 'FixedDialog'
     $dlg.MaximizeBox = $false
@@ -3926,6 +4018,29 @@ function Show-ProfileDialog {
 
     $y += 38
 
+    $lblWindowMode = New-Object System.Windows.Forms.Label
+    $lblWindowMode.Text = 'Window mode:'
+    $lblWindowMode.Location = New-Object System.Drawing.Point(20, ($y + 4))
+    $lblWindowMode.Size = New-Object System.Drawing.Size($labelWidth, 20)
+    $lblWindowMode.ForeColor = $script:UiTextPrimary
+    $dlg.Controls.Add($lblWindowMode)
+
+    $cmbWindowMode = New-Object System.Windows.Forms.ComboBox
+    $cmbWindowMode.DropDownStyle = 'DropDownList'
+    $cmbWindowMode.Location = New-Object System.Drawing.Point($fieldX, $y)
+    $cmbWindowMode.Size = New-Object System.Drawing.Size($fieldWidth, 23)
+    [void]$cmbWindowMode.Items.Add('Default (Cursor decides)')
+    [void]$cmbWindowMode.Items.Add('Classic IDE (--classic)')
+    [void]$cmbWindowMode.Items.Add('Agents Window (--glass)')
+    $windowModeIndex = 0
+    if ($isEdit) {
+        $windowModeIndex = Get-ProfileWindowModeIndex -WindowMode (Get-ProfileWindowMode -Profile $Existing)
+    }
+    $cmbWindowMode.SelectedIndex = $windowModeIndex
+    $dlg.Controls.Add($cmbWindowMode)
+
+    $y += 38
+
     $sepHint = New-Object System.Windows.Forms.Panel
     $sepHint.Location = New-Object System.Drawing.Point(20, $y)
     $sepHint.Size = New-Object System.Drawing.Size(440, 1)
@@ -3972,6 +4087,8 @@ function Show-ProfileDialog {
     Apply-UiThemeToTextInputs -TextBoxes @($txtName, $txtDir, $txtProj, $txtNotes)
     $cmbProxyType.BackColor = $script:UiInputBackColor
     $cmbProxyType.ForeColor = $script:UiInputForeColor
+    $cmbWindowMode.BackColor = $script:UiInputBackColor
+    $cmbWindowMode.ForeColor = $script:UiInputForeColor
 
     if (-not $isEdit) {
         $txtName.Add_TextChanged({
@@ -4005,6 +4122,7 @@ function Show-ProfileDialog {
         Notes       = $txtNotes.Text.Trim()
         RunProxied  = $chkProxy.Checked
         ProxyType   = Get-ProfileProxyTypeFromIndex -Index $cmbProxyType.SelectedIndex
+        WindowMode  = Get-ProfileWindowModeFromIndex -Index $cmbWindowMode.SelectedIndex
     }
 }
 
@@ -4639,7 +4757,7 @@ $btnAdd.Add_Click({
             [System.Windows.Forms.MessageBox]::Show("A profile named '$($result.Name)' already exists.", 'Duplicate name', 'OK', 'Warning') | Out-Null
             return
         }
-        $newProfile = New-ProfileObject -Name $result.Name -UserDataDir $result.UserDataDir -ProjectPath $result.ProjectPath -Notes $result.Notes -RunProxied $result.RunProxied -ProxyType $result.ProxyType
+        $newProfile = New-ProfileObject -Name $result.Name -UserDataDir $result.UserDataDir -ProjectPath $result.ProjectPath -Notes $result.Notes -RunProxied $result.RunProxied -ProxyType $result.ProxyType -WindowMode $result.WindowMode
         $script:Profiles = Normalize-ProfilesList -Profiles (@(Get-ProfilesList) + $newProfile)
         Save-Profiles -Profiles $script:Profiles
         Update-ProfileGrid

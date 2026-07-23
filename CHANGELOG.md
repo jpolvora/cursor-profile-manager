@@ -4,6 +4,17 @@ All notable user-facing changes to Cursor Profile Manager.
 
 Format: dated sections with **Added**, **Changed**, **Removed**, and **Fixed** (when applicable). Newest dates first.
 
+## 2026-07-23
+
+### Added
+- **Per-profile Window Mode** — Add/Edit Profile includes a **Window mode** DropDownList (`Default` / `Classic IDE` / `Agents Window`). Start appends `--classic` or `--glass` for classic/glass (requires a recent Cursor 3.x desktop build); default adds neither flag. Stored as `WindowMode` on each profile (`default` \| `classic` \| `glass`); missing/invalid values normalize to `default`.
+- **Public GitHub Pages site** — static marketing pages under `site/` with Actions deploy (`.github/workflows/pages.yml`) to [https://jpolvora.github.io/cursor-profile-manager/](https://jpolvora.github.io/cursor-profile-manager/).
+- **Workflow skills docs** — `AGENTS.md` and `README.md` document optional [workflow-skills](https://github.com/jpolvora/workflow-skills) install under `.agents/skills/`, including update / `--include-new` / uninstall and the shared agent hub path.
+- **Harness bootstrap** — filled `.agents/skills/shared/config.json` and `STACK.md` for this PowerShell + Agent Story stack; root `AGENTS.md` links to the consumer workflow hub.
+
+### Changed
+- **README project structure** — relative links (no `file:///` absolute paths); lists `.agents/skills/`.
+
 ## 2026-07-05
 
 ### Added

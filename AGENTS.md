@@ -8,6 +8,51 @@ Windows GUI utility to manage and launch **multiple isolated Cursor IDE instance
 
 **Scope:** GUI only — no CLI launchers, no macOS/Linux scripts, no build step.
 
+## Workflow skills (agent harness)
+
+This repo installs portable agent skills from [workflow-skills](https://github.com/jpolvora/workflow-skills) under `.agents/skills/`.
+
+| Role | Path |
+|------|------|
+| **Workflow hub (agents)** | [`.agents/skills/shared/AGENTS.md`](.agents/skills/shared/AGENTS.md) — skill loading, task router, config, gates |
+| **This file** | Product rules for Cursor Profile Manager (PowerShell learnings, launch contract, file map) |
+| **Local config** | `.agents/skills/shared/config.json` (gitignored; fill via `/configure-project`) |
+
+Load the shared hub for `/spec-to-pr`, `/spec-to-pr-lite`, `check-harness`, and related skills. Do not treat managed skill folders as permanent local forks; lasting skill fixes go upstream.
+
+### Install / update / sync / uninstall
+
+Requires **Node.js** (`npx`). Run from the repo root. Canonical package id: `github:jpolvora/workflow-skills` (do **not** append `@latest` or `@main`).
+
+```bash
+# Interactive install (menu: Full / Workflows / Extra)
+npx --yes github:jpolvora/workflow-skills
+
+# Non-interactive examples
+npx --yes github:jpolvora/workflow-skills install --full --yes
+npx --yes github:jpolvora/workflow-skills install --package workflows --yes
+
+# Update tracked skills (preserves shared/ consumer data)
+npx --yes github:jpolvora/workflow-skills update
+
+# Also pull new top-level skills added upstream
+npx --yes github:jpolvora/workflow-skills update --include-new
+
+# Check remote version / integrity / installed version
+npx --yes github:jpolvora/workflow-skills --check
+npx --yes github:jpolvora/workflow-skills integrity
+npx --yes github:jpolvora/workflow-skills --version
+
+# Uninstall named skills (keeps shared/ config, MEMORY, STACK)
+npx --yes github:jpolvora/workflow-skills uninstall --skills <name> --yes
+```
+
+**Preserved on update** (never overwritten): `config.json`, `STACK.md`, `MEMORY.md`, `memory/*`, `installed-skills.json`, and `CHANGELOG.md` when `rules.changelogFile` points under `shared/`.
+
+**After install or update:** ask the agent to run `check-harness`. If `config.json` still has placeholders, run `/configure-project`.
+
+Upstream human docs: [workflow-skills README](https://github.com/jpolvora/workflow-skills#install-update-and-uninstall).
+
 ## Learnings (read before implementing)
 
 Hard-won failures from past sessions. **Read this section before writing or changing code** so the same mistakes are not repeated.
@@ -66,7 +111,8 @@ When a new bug is fixed, **append a row or bullet here** (and add a **Fixed** ch
 | `tests/` | Pester tests for version compare, storage, grid model, theme, process parsing, and update helpers. |
 | `README.md` | User docs — keep in sync with behavior. |
 | `CHANGELOG.md` | User-facing history of features added, changed, or removed. |
-| `AGENTS.md` | This file — architecture, contracts, PowerShell conventions. |
+| `AGENTS.md` | This file — architecture, contracts, PowerShell conventions; workflow skills install/update pointer. |
+| `.agents/skills/` | Installed [workflow-skills](https://github.com/jpolvora/workflow-skills) (managed copies + consumer `shared/` hub). |
 | `agent-story/` | Embedded Node/React proxy and visualization dashboard codebase. |
 
 ## Runtime layout (outside repo)
@@ -110,7 +156,7 @@ Rules:
 On **Start**, the GUI must invoke:
 
 ```text
-Cursor.exe --user-data-dir="<absolute-path>" --new-window [project-path]
+Cursor.exe --user-data-dir="<absolute-path>" --new-window [--classic|--glass] [project-path]
 ```
 
 Rules:
@@ -121,6 +167,7 @@ Rules:
 - **Multiple instances** of the same profile are allowed — each Start adds another `--new-window`.
 - When the profile is **already running** and has a default project folder, launch empty `--new-window` then `--add <project>` (same-folder reuse otherwise).
 - Detect `Cursor.exe` at `%LOCALAPPDATA%\Programs\cursor\` and `Programs\Cursor\`, then `cursor` on PATH.
+- **WindowMode:** profile field `default` \| `classic` \| `glass` (missing/invalid → `default`). Start merges `Get-CursorWindowModeLaunchArgs` into every launch arg list: append `--classic` or `--glass` (never both); `default` adds neither. Requires a recent Cursor 3.x desktop build for those flags. No grid column for WindowMode.
 - **RunProxied profiles:** **ProxyType** `default` (MITM + dashboard, port 8080) or `alternative` (pass-through discovery log, port 8081). Default type appends `--proxy-server`, `--proxy-bypass-list`, and `--ignore-certificate-errors`; sets `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `GLOBAL_AGENT_*` / `NODE_TLS_REJECT_UNAUTHORIZED=0`; syncs `http.proxy`, `http.proxySupport: override`, `http.electronFetch: true` in settings and `argv.json` on every Start. Alternative type uses localhost-only bypass (Git/npm/MCP traffic is logged as CONNECT), sets `GLOBAL_AGENT_*` without TLS bypass, writes NDJSON to `agent-story/server/pass-through-proxy.log`, and runs `npm run analyze-pass-through-log` for host discovery vs default MITM list. User must **fully quit** Cursor before relaunching proxied profiles.
 - **Profile context (all launches):** write `<user-data-dir>\cursor-profile-manager.context.json`, set `CURSOR_PROFILE_MANAGER_*` env vars on spawn, register main PID with Agent Story (`POST /api/profile-sessions/register`). The proxy maps client TCP connections → Cursor PID → user-data-dir → project path for capture grouping.
 
@@ -144,7 +191,7 @@ Key modules inside the script:
 | UI theme | `Get-UiThemePalettes`, `Test-WindowsAppsUseLightTheme`, `Set-UiThemePalette`, `Set-UiThemePreference`, `Apply-UiThemeToMainWindow` | Light/dark palettes; `default` follows Windows `AppsUseLightTheme` |
 | In-app update | `Invoke-CheckForAppUpdate`, `Get-AppVersionIdFromScriptContent`, `Compare-AppVersionId`, `Start-DeferredAppUpdate` | Raw GitHub `master` files; version compare via `# App-Version` / `$script:AppVersionId`; deferred copy after exit |
 | Process scan | `Get-NormalizedUserDataDirFromCommandLine`, `Get-UserDataDirInstanceCountsFromProcessRecords`, `Get-UserDataDirInstanceCounts`, `Get-ProfileInstanceCount` | CIM `Win32_Process`; count `--type=renderer` per user-data-dir (one window each); parsing helpers are unit-tested with mock process records |
-| Launch | `Find-CursorExecutable`, `Find-CursorCliExecutable`, `Get-CursorInstallInfo`, `Test-CursorInstallReady`, `Show-CursorInstallDialog`, `Start-CursorProfileInstance`, `Write-ProfileLaunchLogEntry`, `Get-LastProfileLaunchLogError`, `Show-ProfileLaunchFailure`, `Get-CursorProxyUrl`, `Get-CursorProxyLaunchArgs`, `Get-CursorProxyEnvironmentVariables`, `Update-CursorProfileProxySettings`, `Write-CursorProfileContextMarker`, `Register-CursorProfileWithAgentStory`, `Start-CursorProfileProcess`, `Invoke-ProcessWithEnvironment` | Proxied launches set Chromium flags + Node proxy env + profile `http.proxy`; all launches write profile context marker and register PID with Agent Story; append diagnostics to `launch.log` |
+| Launch | `Find-CursorExecutable`, `Find-CursorCliExecutable`, `Get-CursorInstallInfo`, `Test-CursorInstallReady`, `Show-CursorInstallDialog`, `Start-CursorProfileInstance`, `Write-ProfileLaunchLogEntry`, `Get-LastProfileLaunchLogError`, `Show-ProfileLaunchFailure`, `Get-CursorProxyUrl`, `Get-CursorProxyLaunchArgs`, `Get-CursorProxyEnvironmentVariables`, `Get-ProfileWindowMode`, `Get-CursorWindowModeLaunchArgs`, `Update-CursorProfileProxySettings`, `Write-CursorProfileContextMarker`, `Register-CursorProfileWithAgentStory`, `Start-CursorProfileProcess`, `Invoke-ProcessWithEnvironment` | Proxied launches set Chromium flags + Node proxy env + profile `http.proxy`; WindowMode merges `--classic` / `--glass` into launch args; all launches write profile context marker and register PID with Agent Story; append diagnostics to `launch.log` |
 | Focus | `Get-CursorProfileWindowHandles`, `Invoke-FocusCursorProfile` | EnumWindows by profile PIDs; cycles when multiple windows |
 | Close | `Invoke-CloseAllCursorProfileInstances` | WM_CLOSE on profile windows, then force-stop remaining PIDs |
 | Grid actions | `Add-GridActionColumns`, `Invoke-GridProfileAction`, `Sync-GridActionInstallState`, `Edit-Profile`, `Remove-Profile` | Per-row buttons: Start, Focus, Close, Folder, Edit, Del |

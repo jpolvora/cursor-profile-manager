@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jpolvora/workflow-skills/spec-to-pr/config.schema.json",
+  "title": "spec-to-pr project config",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["project", "verification", "plans"],
+  "properties": {
+    "toolsFile": { "type": "string", "default": "tools.md" },
+    "pathTokens": {
+      "type": "object",
+      "description": "Fixed install-layout hints for brace tokens {skillsRoot} / {sharedDir}. Not relocatable; defaults match the installer. Agents expand before tool calls. See tools.md § Path tokens.",
+      "additionalProperties": true,
+      "properties": {
+        "skillsRoot": {
+          "type": "string",
+          "default": ".agents/skills",
+          "description": "Expand {skillsRoot}. Install contract; do not relocate."
+        },
+        "sharedDir": {
+          "type": "string",
+          "default": ".agents/skills/shared",
+          "description": "Expand {sharedDir}. Usually {skillsRoot}/shared."
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "required": ["name", "baseBranch"],
+      "properties": {
+        "name": { "type": "string" },
+        "org": { "type": "string" },
+        "repoUrl": { "type": "string" },
+        "baseBranch": { "type": "string", "description": "PR target branch (main or master)" },
+        "workingBranch": {
+          "type": "string",
+          "default": "develop",
+          "description": "Active delivery branch used by ship-pr / Step 8–9"
+        },
+        "gitRemote": { "type": "string", "default": "origin" }
+      }
+    },
+    "stack": { "type": "object" },
+    "domain": { "type": "object" },
+    "providers": {
+      "type": "object",
+      "description": "Work-item/spec source and SCM host. Optional: when omitted, infer active from issueTrackers.*.enabled (GitHub if enabled, else Azure DevOps, else local); scm defaults to active when active is github|azure-devops, or from project.repoUrl host when active is local.",
+      "additionalProperties": true,
+      "properties": {
+        "active": {
+          "type": "string",
+          "enum": ["github", "azure-devops", "local"],
+          "description": "Provider skill for fetch-to-spec / entry registration. When set, overrides bare-number tracker preference from issueTrackers.*.enabled."
+        },
+        "scm": {
+          "type": "string",
+          "enum": ["github", "azure-devops"],
+          "description": "Provider skill for create-pr, list-threads, resolve-thread, merge-pr, and remote validate-auth. Never local. Hybrid allowed: active=local with scm=github|azure-devops."
+        }
+      }
+    },
+    "issueTrackers": { "type": "object" },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "backendBuild": { "type": "string" },
+        "backendTest": { "type": "string" },
+        "backendFormat": { "type": "string" },
+        "frontendBuild": { "type": "string" },
+        "frontendTest": { "type": "string" },
+        "migrationsAdd": { "type": "string" },
+        "migrationsApply": { "type": "string" }
+      }
+    },
+    "dagThresholds": {
+      "type": "object",
+      "properties": {
+        "maxImplementationSteps": { "type": "integer", "minimum": 1 },
+        "maxExpectedFiles": { "type": "integer", "minimum": 1 },
+        "maxLayers": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "properties": {
+        "autoMode": { "type": "boolean" },
+        "dryRun": { "type": "boolean" },
+        "skipTesting": {
+          "type": "boolean",
+          "description": "Skip Step 7 Testing (standard orch)."
+        },
+        "skipTests": { "type": "boolean" },
+        "fullMode": { "type": "boolean" }
+      }
+    },
+    "plans": {
+      "type": "object",
+      "required": ["dir"],
+      "properties": {
+        "dir": {
+          "type": "string",
+          "default": ".agents/plans",
+          "description": "Root for {us-dir} = {dir}/{slug}/"
+        },
+        "specsDir": {
+          "type": "string",
+          "default": ".agents/specs",
+          "description": "Repo-relative directory for human-facing local specs (default: .agents/specs). Prefer existing repo-root specs/ when already present. Used by local-spec-provider detect/configure and optional mirrors; canonical workflow copy remains {us-dir}/step-00-{slug}.spec.md"
+        },
+        "worktreesDir": {
+          "type": "string",
+          "default": ".agents/plans/{slug}/worktrees",
+          "description": "Worktree root template; {slug} substituted at runtime. Prefer nesting under plans.dir (e.g. .agents/plans/{slug}/worktrees)."
+        },
+        "useWorktrees": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, prefer git worktree isolation for Step 4 implement (non-win32, path length ≤180, git worktree add succeeds)."
+        }
+      }
+    },
+    "reviews": {
+      "type": "object",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "default": ".agents/codereviews",
+          "description": "Root for local PR review round reports (fix-pr / goal-fix-pr)"
+        }
+      }
+    },
+    "rules": { "type": "object" },
+    "invariants": { "type": "object" }
+  }
+}

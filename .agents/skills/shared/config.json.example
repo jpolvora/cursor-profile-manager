@@ -1,0 +1,160 @@
+{
+  "$schema": "./config.schema.json",
+  "_comment": "Fresh install seeds this file as config.json (gitignored — never commit). Fill via configure-project. toolsFile points to the tool vocabulary all agents use.",
+  "toolsFile": "tools.md",
+
+  "pathTokens": {
+    "_comment": "Fixed install layout (not relocatable). Expand brace tokens before Read/Grep/Shell. Full contract: tools.md § Path tokens. plansDir/reviewsDir still resolve from plans.dir / reviews.dir.",
+    "skillsRoot": ".agents/skills",
+    "sharedDir": ".agents/skills/shared"
+  },
+
+  "project": {
+    "name": "<PROJECT_NAME>",
+    "org": "<GITHUB_ORG>",
+    "repoUrl": "https://github.com/<ORG>/<REPO>",
+    "baseBranch": "master",
+    "workingBranch": "develop",
+    "gitRemote": "origin"
+  },
+
+  "stack": {
+    "id": "<STACK_ID e.g. dotnet-react, node-nextjs, python-django>",
+    "description": "<Brief stack description>",
+
+    "backend": {
+      "framework": "<e.g. .NET 10, Node 22, Python 3.12>",
+      "language": "<e.g. C#, TypeScript, Python>",
+      "solutionFile": "<e.g. MyApp.slnx, package.json, pyproject.toml>",
+      "srcDir": "src",
+      "layers": [
+        { "name": "<layer>", "path": "<path>", "role": "<responsibilities>" }
+      ],
+      "testProject": "<e.g. tests/MyApp.Tests/MyApp.Tests.csproj>",
+      "apiHost": "http://localhost:5000",
+      "apiPort": 5000
+    },
+
+    "frontend": {
+      "framework": "<e.g. React 19 + Vite, Next.js 14, Vue 3>",
+      "language": "<e.g. TypeScript, JavaScript>",
+      "sourceDir": "<e.g. web/src, src/app>",
+      "buildDir": "<e.g. web>",
+      "devHost": "http://localhost:3000",
+      "devPort": 3000,
+      "i18n": {
+        "framework": "<e.g. react-i18next, next-intl, none>",
+        "localesDir": "<path to locale files>",
+        "locales": ["<e.g. en-US>"]
+      }
+    },
+
+    "database": {
+      "type": "<e.g. PostgreSQL, SQLite, MongoDB>",
+      "orm": "<e.g. Entity Framework Core, Prisma, Drizzle>",
+      "migrationsProject": "<path>",
+      "startupProject": "<path>",
+      "seedScript": "<e.g. scripts/seed.sh>"
+    },
+
+    "orchestration": {
+      "devCommand": "<e.g. npm run dev>",
+      "startCommand": "<e.g. npm start>",
+      "stopCommand": "<e.g. npm stop>",
+      "composeCommand": "<e.g. docker compose up --build>"
+    }
+  },
+
+  "domain": {
+    "model": "<Brief domain model description>",
+    "tenancyField": "<e.g. CompanyId, TenantId>",
+    "platformPrefix": "<e.g. /api/v1/platform>",
+    "glossaryFile": "CONTEXT.md",
+    "designTokens": "DESIGN.md",
+    "architectureSpec": "<path to architecture spec doc>"
+  },
+
+  "providers": {
+    "_comment": "active = work-item/spec source (github | azure-devops | local). scm = PR/thread host (github | azure-devops only; never local). Hybrid example: active=local + scm=github (local specs, GitHub PRs). If scm omitted: when active is github|azure-devops → scm=active; when active=local → infer from project.repoUrl host (github.com → github; dev.azure.com|visualstudio.com → azure-devops) or STOP and set scm explicitly. LEGACY: omit this entire providers block to infer active from issueTrackers.*.enabled (GitHub if enabled, else Azure DevOps, else local).",
+    "active": "github",
+    "scm": "github"
+  },
+
+  "issueTrackers": {
+    "github": {
+      "enabled": true,
+      "owner": "<GITHUB_ORG>",
+      "repo": "<GITHUB_REPO>",
+      "cli": "gh",
+      "issueToSpecScript": ".agents/skills/github-provider/scripts/github-issue-to-spec.py"
+    },
+    "azureDevOps": {
+      "enabled": false,
+      "_comment": "Set enabled: true and fill org/project. Put token in ADO_PAT (or AZURE_DEVOPS_PAT) — never commit it.",
+      "org": "",
+      "project": "",
+      "patEnvVar": "ADO_PAT",
+      "apiBase": "https://dev.azure.com",
+      "workItemToSpecScript": ".agents/skills/azure-devops-provider/scripts/ado-workitem-to-spec.py"
+    }
+  },
+
+  "verification": {
+    "backendBuild": "<e.g. dotnet build MyApp.slnx, npm run build, pytest>",
+    "backendTest": "<e.g. dotnet test tests/MyApp.Tests, npm test, pytest>",
+    "backendFormat": "<e.g. dotnet format MyApp.slnx --verify-no-changes, npm run lint>",
+    "frontendBuild": "<e.g. cd web && npm run build>",
+    "frontendTest": "<e.g. cd web && npm test>",
+    "migrationsAdd": "<e.g. dotnet ef migrations add {Name} -p src/Infrastructure -s src/Api>",
+    "migrationsApply": "<e.g. dotnet ef database update -p src/Infrastructure -s src/Api>"
+  },
+
+  "dagThresholds": {
+    "_comment": "If ALL criteria are within limits, execMode is sequential (skip DAG).",
+    "maxImplementationSteps": 3,
+    "maxExpectedFiles": 6,
+    "maxLayers": 2
+  },
+
+  "defaults": {
+    "autoMode": false,
+    "dryRun": false,
+    "skipTesting": false,
+    "skipTests": false,
+    "fullMode": false
+  },
+
+  "plans": {
+    "dir": ".agents/plans",
+    "_comment_plansDir": "Resolve skill token {plansDir} from plans.dir (there is no separate plansDir key).",
+    "_comment_specsDir": "Human-facing local specs dir under .agents/ by default (.agents/specs). Prefer existing repo-root specs/ when already present. Canonical workflow copy stays under {plansDir}/{slug}/step-00-*.spec.md.",
+    "specsDir": ".agents/specs",
+    "worktreesDir": ".agents/plans/{slug}/worktrees",
+    "useWorktrees": false
+  },
+
+  "reviews": {
+    "_comment": "Optional local review artifact root (fix-pr / goal-fix-pr round reports).",
+    "dir": ".agents/codereviews"
+  },
+
+  "rules": {
+    "_comment": "Guardrails paths. Resolve per shared/AGENTS.md External dependencies (first match). seniorDeveloper = Code review proof checklist source; karpathyGuidelines = surgical-change skill; stackFile = stack companion; changelogFile = append-only history (default under shared/); other keys optional consumer rule paths — leave empty when unused.",
+    "harness": ".agents/skills/shared/AGENTS.md",
+    "seniorDeveloper": "",
+    "karpathyGuidelines": ".agents/skills/karpathy-guidelines/SKILL.md",
+    "viewPatterns": "",
+    "efMigrations": "",
+    "stackFile": ".agents/skills/shared/STACK.md",
+    "changelogFile": ".agents/skills/shared/CHANGELOG.md"
+  },
+
+  "invariants": {
+    "entitiesAreClassNotRecord": true,
+    "migrationsCliOnly": true,
+    "tenancyViaGlobalQueryFilters": true,
+    "efOnlyInInfrastructure": true,
+    "noInlineHandWrittenMigrations": true,
+    "commitPlanFilesOnlyAtStep8": true
+  }
+}
