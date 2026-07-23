@@ -15,6 +15,14 @@ Each profile gets its own folder under `%USERPROFILE%\.cursor-profiles\` (overri
 
 The Profile Manager window title is built dynamically as **Cursor Profile Manager v*version*** so it is distinct from a Cursor IDE window editing this repo. **Multiple manager windows** may run at once — each launch opens a new instance.
 
+## Website
+
+Public marketing site: [https://jpolvora.github.io/cursor-profile-manager/](https://jpolvora.github.io/cursor-profile-manager/)
+
+Static source lives in [`site/`](site/). GitHub Actions (`.github/workflows/pages.yml`) deploys on push to `master` when `site/**` or that workflow file changes. README-only pushes do not redeploy the site.
+
+**Maintainer enablement (one-time):** Repo **Settings → Pages → Build and deployment → Source: GitHub Actions**. After the first green workflow run, the URL above serves the site.
+
 ## Screenshots
 
 ### Main window
@@ -173,19 +181,39 @@ Requires [Pester](https://pester.dev/) 3.x or later. Run from the repo root:
 ```
 Tests are isolated and run in a temporary sandbox directory, protecting your active profiles and configuration settings.
 
+## Agent workflow skills (optional)
+
+This repository can install portable agent skills from [workflow-skills](https://github.com/jpolvora/workflow-skills) into `.agents/skills/` (spec→PR workflows, harness audit, etc.). They are for AI-assisted development of this project, not required to run the Profile Manager GUI.
+
+| | |
+|:---|:---|
+| **Agent hub** | [`.agents/skills/shared/AGENTS.md`](.agents/skills/shared/AGENTS.md) |
+| **Product agent guide** | [`AGENTS.md`](AGENTS.md) (PowerShell conventions + install/update commands) |
+| **Local config** | `.agents/skills/shared/config.json` (gitignored; `/configure-project`) |
+
+```bash
+# Install (interactive) or update tracked skills — requires Node.js / npx
+npx --yes github:jpolvora/workflow-skills
+npx --yes github:jpolvora/workflow-skills update
+npx --yes github:jpolvora/workflow-skills update --include-new
+```
+
+After install or update, ask your agent to run `check-harness`. Full CLI options: [workflow-skills install docs](https://github.com/jpolvora/workflow-skills#install-update-and-uninstall).
+
 ## Project Structure
 
 | File / Folder | Description |
 |:---|:---|
-| [cursor-profile-manager.ps1](file:///L:/source/cursor-profile-manager/cursor-profile-manager.ps1) | The main application GUI written in PowerShell and WinForms. |
-| [cursor-profile-manager.bat](file:///L:/source/cursor-profile-manager/cursor-profile-manager.bat) | Silent launcher wrapper that boots the GUI without showing a console window. |
-| [install-desktop-shortcut.ps1](file:///L:/source/cursor-profile-manager/install-desktop-shortcut.ps1) | Sets up or repairs a Windows Desktop shortcut with the native Cursor icon. |
-| [run-tests.ps1](file:///L:/source/cursor-profile-manager/run-tests.ps1) | PowerShell test runner for Pester unit testing. |
-| [tests/](file:///L:/source/cursor-profile-manager/tests/) | Directory containing Pester unit tests. |
-| [agent-story/](file:///L:/source/cursor-profile-manager/agent-story/) | Embedded Node/React proxy and visualization dashboard codebase. |
-| [screenshots/](file:///L:/source/cursor-profile-manager/screenshots/) | PNG screenshots for documentation. |
-| [CHANGELOG.md](file:///L:/source/cursor-profile-manager/CHANGELOG.md) | Release change log. |
-| [AGENTS.md](file:///L:/source/cursor-profile-manager/AGENTS.md) | Technical guidelines, rules, and reference files for AI coding assistants. |
+| [cursor-profile-manager.ps1](cursor-profile-manager.ps1) | The main application GUI written in PowerShell and WinForms. |
+| [cursor-profile-manager.bat](cursor-profile-manager.bat) | Silent launcher wrapper that boots the GUI without showing a console window. |
+| [install-desktop-shortcut.ps1](install-desktop-shortcut.ps1) | Sets up or repairs a Windows Desktop shortcut with the native Cursor icon. |
+| [run-tests.ps1](run-tests.ps1) | PowerShell test runner for Pester unit testing. |
+| [tests/](tests/) | Directory containing Pester unit tests. |
+| [agent-story/](agent-story/) | Embedded Node/React proxy and visualization dashboard codebase. |
+| [.agents/skills/](.agents/skills/) | Optional installed [workflow-skills](https://github.com/jpolvora/workflow-skills) (managed copies + local `shared/` config). |
+| [screenshots/](screenshots/) | PNG screenshots for documentation. |
+| [CHANGELOG.md](CHANGELOG.md) | Release change log. |
+| [AGENTS.md](AGENTS.md) | Technical guidelines for AI coding assistants (product + workflow skills usage). |
 
 ## Notes & Limitations
 

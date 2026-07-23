@@ -8,6 +8,51 @@ Windows GUI utility to manage and launch **multiple isolated Cursor IDE instance
 
 **Scope:** GUI only — no CLI launchers, no macOS/Linux scripts, no build step.
 
+## Workflow skills (agent harness)
+
+This repo installs portable agent skills from [workflow-skills](https://github.com/jpolvora/workflow-skills) under `.agents/skills/`.
+
+| Role | Path |
+|------|------|
+| **Workflow hub (agents)** | [`.agents/skills/shared/AGENTS.md`](.agents/skills/shared/AGENTS.md) — skill loading, task router, config, gates |
+| **This file** | Product rules for Cursor Profile Manager (PowerShell learnings, launch contract, file map) |
+| **Local config** | `.agents/skills/shared/config.json` (gitignored; fill via `/configure-project`) |
+
+Load the shared hub for `/spec-to-pr`, `/spec-to-pr-lite`, `check-harness`, and related skills. Do not treat managed skill folders as permanent local forks; lasting skill fixes go upstream.
+
+### Install / update / sync / uninstall
+
+Requires **Node.js** (`npx`). Run from the repo root. Canonical package id: `github:jpolvora/workflow-skills` (do **not** append `@latest` or `@main`).
+
+```bash
+# Interactive install (menu: Full / Workflows / Extra)
+npx --yes github:jpolvora/workflow-skills
+
+# Non-interactive examples
+npx --yes github:jpolvora/workflow-skills install --full --yes
+npx --yes github:jpolvora/workflow-skills install --package workflows --yes
+
+# Update tracked skills (preserves shared/ consumer data)
+npx --yes github:jpolvora/workflow-skills update
+
+# Also pull new top-level skills added upstream
+npx --yes github:jpolvora/workflow-skills update --include-new
+
+# Check remote version / integrity / installed version
+npx --yes github:jpolvora/workflow-skills --check
+npx --yes github:jpolvora/workflow-skills integrity
+npx --yes github:jpolvora/workflow-skills --version
+
+# Uninstall named skills (keeps shared/ config, MEMORY, STACK)
+npx --yes github:jpolvora/workflow-skills uninstall --skills <name> --yes
+```
+
+**Preserved on update** (never overwritten): `config.json`, `STACK.md`, `MEMORY.md`, `memory/*`, `installed-skills.json`, and `CHANGELOG.md` when `rules.changelogFile` points under `shared/`.
+
+**After install or update:** ask the agent to run `check-harness`. If `config.json` still has placeholders, run `/configure-project`.
+
+Upstream human docs: [workflow-skills README](https://github.com/jpolvora/workflow-skills#install-update-and-uninstall).
+
 ## Learnings (read before implementing)
 
 Hard-won failures from past sessions. **Read this section before writing or changing code** so the same mistakes are not repeated.
@@ -66,7 +111,8 @@ When a new bug is fixed, **append a row or bullet here** (and add a **Fixed** ch
 | `tests/` | Pester tests for version compare, storage, grid model, theme, process parsing, and update helpers. |
 | `README.md` | User docs — keep in sync with behavior. |
 | `CHANGELOG.md` | User-facing history of features added, changed, or removed. |
-| `AGENTS.md` | This file — architecture, contracts, PowerShell conventions. |
+| `AGENTS.md` | This file — architecture, contracts, PowerShell conventions; workflow skills install/update pointer. |
+| `.agents/skills/` | Installed [workflow-skills](https://github.com/jpolvora/workflow-skills) (managed copies + consumer `shared/` hub). |
 | `agent-story/` | Embedded Node/React proxy and visualization dashboard codebase. |
 
 ## Runtime layout (outside repo)
