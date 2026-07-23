@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cursor Profile Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Sora:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <p class="brand">Cursor Profile Manager</p>
+  </header>
+
+  <main>
+    <section class="hero" aria-label="Hero">
+      <div class="hero-copy">
+        <p class="hero-brand">Cursor Profile Manager</p>
+        <h1 class="hero-headline">Multiple Cursor profiles. Separate accounts on one machine.</h1>
+        <p class="hero-support">Each profile keeps its own login, extensions, settings, and AI chat history so you can work the same codebase under different Cursor accounts.</p>
+        <p class="hero-cta">
+          <a class="btn btn-primary" href="#how-to">Get started</a>
+          <a class="btn btn-secondary" href="https://github.com/jpolvora/cursor-profile-manager">GitHub</a>
+        </p>
+      </div>
+      <div class="hero-visual">
+        <img
+          class="hero-image"
+          src="assets/main-window-hero.png"
+          alt="Cursor Profile Manager main window showing multiple isolated profiles, some Running and some Idle, with per-row Start Focus Close actions"
+          width="1600"
+          height="900"
+          decoding="async">
+      </div>
+    </section>
+
+    <section id="how-to" class="how-to" aria-labelledby="how-to-heading">
+      <h2 id="how-to-heading">How to use</h2>
+      <p class="how-to-intro">Windows only. Each profile launches Cursor with its own <code>--user-data-dir</code>, so logins, extensions, settings, and AI chat history stay isolated.</p>
+      <ol class="how-to-steps">
+        <li>
+          <h3>Obtain and run on Windows</h3>
+          <p>Clone the repository, then run <code>.\cursor-profile-manager.ps1</code> or double-click <code>cursor-profile-manager.bat</code>. Optionally run <code>.\install-desktop-shortcut.ps1</code> for a desktop shortcut with the Cursor icon.</p>
+        </li>
+        <li>
+          <h3>Add a profile</h3>
+          <p>In the toolbar, click <strong>Add Profile</strong>. The app suggests an isolated folder under <code>%USERPROFILE%\.cursor-profiles\</code>. You can optionally set a default project folder.</p>
+        </li>
+        <li>
+          <h3>Start Cursor under that profile</h3>
+          <p>Click <strong>Start &#9654;</strong> on the row (or double-click the row). Cursor opens with <code>--user-data-dir</code> pointing at that profile folder. Click Start again on the same profile to open another window that shares the same session and extensions.</p>
+        </li>
+        <li>
+          <h3>Use a second profile for a different account</h3>
+          <p>Add another profile, Start it, and sign in to a different Cursor account the first time that profile launches. Both profiles can run at the same time on the same project folders.</p>
+        </li>
+      </ol>
+      <p class="how-to-note">Optional: for proxied AI traffic capture (Agent Story), see the <a href="https://github.com/jpolvora/cursor-profile-manager#usage">Usage</a> section in the README.</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      <a href="https://github.com/jpolvora/cursor-profile-manager">GitHub repository</a>
+    </p>
+    <p>Windows only.</p>
+  </footer>
+</body>
+</html>
