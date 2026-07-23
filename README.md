@@ -88,8 +88,8 @@ Re-run the shortcut installer if you move the folder to automatically repair the
 
 1. **Launch the Manager:** Run `cursor-profile-manager.ps1` or use the Desktop shortcut.
 2. **Add a Profile:** Click the **Add Profile** button in the toolbar. It automatically suggests isolated folders under `%USERPROFILE%\.cursor-profiles\`.
-3. **Configure Defaults:** Optionally choose a default project directory (Cursor will open this workspace on startup).
-4. **Launch Cursor:** Click **Start ▶** (or double-click the row). This spawns Cursor with `--user-data-dir` pointing to your profile folder.
+3. **Configure Defaults:** Optionally choose a default project directory (Cursor will open this workspace on startup). Optionally set **Window mode**: **Default (Cursor decides)**, **Classic IDE (`--classic`)**, or **Agents Window (`--glass`)**. Classic and Agents Window require a recent Cursor 3.x desktop build; older builds ignore unknown flags.
+4. **Launch Cursor:** Click **Start ▶** (or double-click the row). This spawns Cursor with `--user-data-dir` pointing to your profile folder (and `--classic` / `--glass` when Window mode is set).
 5. **Multiple Windows:** Click **Start ▶** again on the same running profile to open additional windows sharing that profile's session and extensions.
 6. **Actions:** Use **Focus** to bring the active windows to the front, **Close** to terminate all instances of a profile, **Folder** to open the user-data directory in File Explorer, and **Edit** / **Del** to modify profile info.
 7. **Trace AI Interactions (v2):**
@@ -109,9 +109,9 @@ Re-run the shortcut installer if you move the folder to automatically repair the
 
 Behind the scenes, the manager invokes:
 ```text
-Cursor.exe --user-data-dir "<profile-dir>" --new-window [project-path]
+Cursor.exe --user-data-dir "<profile-dir>" --new-window [--classic|--glass] [project-path]
 ```
-By using separate user-data directories (instead of Cursor's `--profile` flag), all configurations, caches, extensions, and OAuth credentials remain completely independent.
+By using separate user-data directories (instead of Cursor's `--profile` flag), all configurations, caches, extensions, and OAuth credentials remain completely independent. When **Window mode** is **Classic IDE** or **Agents Window**, Start appends `--classic` or `--glass` (never both). **Default** adds neither flag. These flags need a recent Cursor 3.x desktop build.
 
 ### Network Proxy Mechanism
 
@@ -155,6 +155,7 @@ Saved under `<CURSOR_PROFILES_DIR>\profiles.json` (encoded in UTF-8):
     "Notes": "Dedicated work profile for Client A",
     "RunProxied": true,
     "ProxyType": "default",
+    "WindowMode": "default",
     "CreatedAt": "2026-06-30T12:00:00"
   }
 ]

@@ -57,6 +57,33 @@ Describe 'Profile and settings storage' {
             $loaded[0].ProxyType | Should Be 'default'
         }
 
+        It 'adds missing WindowMode property on load' {
+            $json = '[{"Id":"test-789","Name":"legacy-wm","UserDataDir":"C:\\temp","ProjectPath":"","Notes":"","RunProxied":false,"ProxyType":"default","CreatedAt":"2026-07-05T12:00:00"}]'
+            $path = Join-Path $global:ProfileManagerTestProfilesDir 'profiles.json'
+            Set-Content -Path $path -Value $json -Encoding UTF8
+
+            $loaded = @(Load-Profiles)
+            $loaded[0].WindowMode | Should Be 'default'
+        }
+
+        It 'normalizes invalid WindowMode on load' {
+            $json = '[{"Id":"test-790","Name":"bad-wm","UserDataDir":"C:\\temp","ProjectPath":"","Notes":"","RunProxied":false,"ProxyType":"default","WindowMode":"nope","CreatedAt":"2026-07-05T12:00:00"}]'
+            $path = Join-Path $global:ProfileManagerTestProfilesDir 'profiles.json'
+            Set-Content -Path $path -Value $json -Encoding UTF8
+
+            $loaded = @(Load-Profiles)
+            $loaded[0].WindowMode | Should Be 'default'
+        }
+
+        It 'preserves classic and glass WindowMode on load' {
+            $json = '[{"Id":"test-791","Name":"glass-wm","UserDataDir":"C:\\temp","ProjectPath":"","Notes":"","RunProxied":false,"ProxyType":"default","WindowMode":"glass","CreatedAt":"2026-07-05T12:00:00"}]'
+            $path = Join-Path $global:ProfileManagerTestProfilesDir 'profiles.json'
+            Set-Content -Path $path -Value $json -Encoding UTF8
+
+            $loaded = @(Load-Profiles)
+            $loaded[0].WindowMode | Should Be 'glass'
+        }
+
         It 'returns an empty list when profiles.json is corrupt' {
             $badPath = Join-Path $global:ProfileManagerTestProfilesDir 'profiles.json'
             Set-Content -Path $badPath -Value '{ not valid json' -Encoding UTF8
